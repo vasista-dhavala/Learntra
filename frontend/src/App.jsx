@@ -4,6 +4,7 @@ import { useEffect, lazy, Suspense } from "react";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import Navbar from "./components/Navbar.jsx";
 import Footer from "./components/Footer.jsx";
+import ChatBot from "./components/ChatBot.jsx";
 import Home from "./pages/Home.jsx";
 
 /* -------------------------------------------------------
@@ -132,6 +133,9 @@ export default function App() {
       </ErrorBoundary>
 
       <Footer />
+
+      {/* Floating AI Chatbot — available on all pages */}
+      <ChatBot />
     </>
   );
 }

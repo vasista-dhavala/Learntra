@@ -5,7 +5,7 @@ export default class ErrorBoundary extends Component {
     return { e };
   }
   componentDidCatch(e) {
-    console.error("FinSim error:", e);
+    console.error("Learntra error:", e);
   }
   render() {
     const { e } = this.state;

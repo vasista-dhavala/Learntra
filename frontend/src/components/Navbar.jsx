@@ -48,13 +48,13 @@ export default function Navbar() {
   const [openGroup, setOpenGroup] = useState(null);
 
   const [darkMode, setDarkMode] = useState(() => {
-    return localStorage.getItem("finsim-theme") === "dark";
+    return localStorage.getItem("learntra-theme") === "dark";
   });
 
   useEffect(() => {
     document.body.classList.toggle("dark-theme", darkMode);
 
-    localStorage.setItem("finsim-theme", darkMode ? "dark" : "light");
+    localStorage.setItem("learntra-theme", darkMode ? "dark" : "light");
   }, [darkMode]);
 
   const toggleTheme = () => {
@@ -74,7 +74,7 @@ export default function Navbar() {
         {/* LOGO */}
         <Link to="/" className="brand" onClick={() => setMobileOpen(false)}>
           <Rocket color="#2563eb" size={28} />
-          <span>FinSim AI</span>
+          <span>Learntra</span>
         </Link>
 
         {/* NAVIGATION */}

@@ -6,7 +6,7 @@ export default function Footer() {
     <footer className="foot">
       <div className="wrap">
         <div>
-          <b>FinSim AI</b>
+          <b>Learntra</b>
           <p className="mu">
             Learn finance. Simulate investing. Build your future.
           </p>

@@ -864,7 +864,7 @@ export function About() {
   return (
     <main className="wrap page">
       <Head
-        t="About FinSim AI"
+        t="About Learntra"
         s="Our mission is to make financial confidence a skill anyone can practice."
       />
       <div className="g3">
@@ -881,7 +881,7 @@ export function About() {
       </div>
       <div className="g3">
         <div className="card">
-          <h3>Why FinSim AI</h3>
+          <h3>Why Learntra</h3>
           <p className="mu">
             Risk-free practice builds real habits before real money is involved.
           </p>
@@ -898,7 +898,7 @@ export function About() {
         </div>
       </div>
       <Link to="/signup" className="btn p">
-        Join FinSim AI
+        Join Learntra
       </Link>
     </main>
   );
@@ -933,7 +933,7 @@ const Auth = ({ t, sw, children, to, btn }) => {
 };
 export const Login = () => (
   <Auth
-    t="Log in to FinSim AI"
+    t="Log in to Learntra"
     sw={["New here?", "Sign Up"]}
     to="/signup"
     btn="Login"

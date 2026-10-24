@@ -377,7 +377,7 @@ export default function Home() {
               <h3>Ready to start your financial journey?</h3>
               <p>
                 Join thousands of learners who are investing in their future
-                with FinSim AI.
+                with Learntra.
               </p>
             </div>
           </div>

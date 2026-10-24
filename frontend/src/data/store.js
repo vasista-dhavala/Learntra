@@ -1,6 +1,6 @@
 import { useSyncExternalStore, useState, useEffect } from "react";
 import { assets } from "./data.js";
-const KEY = "finsim-portfolio",
+const KEY = "learntra-portfolio",
   START = 100000,
   init = { cash: START, real: 0, hold: {}, log: [] };
 let st = (() => {

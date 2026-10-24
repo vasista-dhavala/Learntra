@@ -23,7 +23,7 @@ import "./FinancePages.css";
 
 const Demo = () => (
   <p className="tiny">
-    Simulated demo content. FinSim AI does not provide real-time financial
+    Simulated demo content. Learntra does not provide real-time financial
     advice or live trading.
   </p>
 );
@@ -395,7 +395,7 @@ export function InvestingTrading() {
         <div className="card">
           <h3>Virtual Trading</h3>
           <p className="mu">
-            Use FinSim AI's simulation to practise trades with ₹1,00,000 virtual
+            Use Learntra's simulation to practise trades with ₹1,00,000 virtual
             money.
           </p>
         </div>
