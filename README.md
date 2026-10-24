@@ -53,4 +53,4 @@ These commands start the frontend. Backend services and integrations must be con
 
 ## Disclaimer
 
-Learntra is an educational platform. It does not execute real trades or guarantee investment returns. Its simulations and AI-generated guidance are for informational purposes only.
+Learntra is an educational platform. It does not execute real trades or guarantee investment returns.
