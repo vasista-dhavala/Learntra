@@ -5,6 +5,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { useState } from "react";
+import { loginUser, registerUser } from "../data/auth.js";
 import StockChart, { Spark } from "../components/StockChart.jsx";
 import {
   movers,
@@ -904,72 +905,97 @@ export function About() {
   );
 }
 
-const Auth = ({ t, sw, children, to, btn }) => {
-  const nav = useNavigate();
+function AuthLayout({ title, switchText, switchLabel, switchTo, children, onSubmit, buttonText, error, busy }) {
   return (
-    <main className="wrap">
+    <main className="wrap page">
       <div className="card auth">
-        <h1 style={{ fontSize: 26 }}>{t}</h1>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            nav("/invest");
-          }}
-        >
+        <h1 style={{ fontSize: 26 }}>{title}</h1>
+        <form onSubmit={onSubmit} style={{ display: "grid", gap: 12 }}>
           {children}
-          <button className="btn p" style={{ justifyContent: "center" }}>
-            {btn}
+          {error && <p role="alert" className="dn tiny">{error}</p>}
+          <button className="btn p" style={{ justifyContent: "center" }} disabled={busy}>
+            {busy ? "Please wait…" : buttonText}
           </button>
         </form>
         <p className="mu" style={{ marginTop: 16 }}>
-          {sw[0]}{" "}
-          <Link to={to} style={{ color: "#2563eb" }}>
-            {sw[1]}
-          </Link>
+          {switchText}{" "}
+          <Link to={switchTo} style={{ color: "#2563eb" }}>{switchLabel}</Link>
+        </p>
+        <p className="tiny mu" style={{ marginTop: 10 }}>
+          Demo account data is saved in this browser on this device.
         </p>
       </div>
     </main>
   );
-};
-export const Login = () => (
-  <Auth
-    t="Log in to Learntra"
-    sw={["New here?", "Sign Up"]}
-    to="/signup"
-    btn="Login"
-  >
-    <input type="email" placeholder="Email" required />
-    <input type="password" placeholder="Password" required />
-    <label className="tiny">
-      <input type="checkbox" style={{ width: "auto" }} /> Remember me
-    </label>
-    <span className="tiny" style={{ color: "#2563eb" }}>
-      Forgot password?
-    </span>
-    <button type="button" className="btn">
-      Continue with Google
-    </button>
-  </Auth>
-);
-export const Signup = () => (
-  <Auth
-    t="Create your account"
-    sw={["Already have an account?", "Login"]}
-    to="/login"
-    btn="Create Account"
-  >
-    <input placeholder="Name" required />
-    <input type="email" placeholder="Email" required />
-    <input type="password" placeholder="Password" required />
-    <input type="password" placeholder="Confirm Password" required />
-    <select>
-      <option>Teens</option>
-      <option>20s</option>
-      <option>30s</option>
-      <option>40s+</option>
-    </select>
-  </Auth>
-);
+}
+
+export function Login() {
+  const nav = useNavigate();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (event) => {
+    event.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      await loginUser({ email, password });
+      nav("/invest", { replace: true });
+    } catch (err) {
+      setError(err.message || "Unable to log in. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <AuthLayout title="Log in to Learntra" switchText="New here?" switchLabel="Sign Up" switchTo="/signup" onSubmit={submit} buttonText="Login" error={error} busy={busy}>
+      <label className="fld"><span>Email</span><input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
+      <label className="fld"><span>Password</span><input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
+    </AuthLayout>
+  );
+}
+
+export function Signup() {
+  const nav = useNavigate();
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [ageGroup, setAgeGroup] = useState("20s");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (event) => {
+    event.preventDefault();
+    setError("");
+    if (password.length < 8) {
+      setError("Use a password with at least 8 characters.");
+      return;
+    }
+    if (password !== confirm) {
+      setError("Passwords do not match.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await registerUser({ name, email, password, ageGroup });
+      nav("/invest", { replace: true });
+    } catch (err) {
+      setError(err.message || "Unable to create your account. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <AuthLayout title="Create your account" switchText="Already have an account?" switchLabel="Login" switchTo="/login" onSubmit={submit} buttonText="Create Account" error={error} busy={busy}>
+      <label className="fld"><span>Full name</span><input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" required /></label>
+      <label className="fld"><span>Email</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required /></label>
+      <label className="fld"><span>Password (minimum 8 characters)</span><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" minLength={8} required /></label>
+      <label className="fld"><span>Confirm password</span><input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" required /></label>
+      <label className="fld"><span>Age group</span><select value={ageGroup} onChange={(e) => setAgeGroup(e.target.value)}><option>Teens</option><option>20s</option><option>30s</option><option>40s+</option></select></label>
+    </AuthLayout>
+  );
+}
 export const NotFound = () => (
   <main
     className="wrap page"

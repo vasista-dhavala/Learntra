@@ -1,51 +1,86 @@
 import { useSyncExternalStore, useState, useEffect } from "react";
 import { assets } from "./data.js";
-const KEY = "learntra-portfolio",
-  START = 100000,
-  init = { cash: START, real: 0, hold: {}, log: [] };
-let st = (() => {
+import { getCurrentUser } from "./auth.js";
+
+const START = 100000;
+const LEGACY_KEY = "learntra-portfolio";
+const initialState = () => ({ cash: START, real: 0, hold: {}, log: [] });
+const storageKey = () => {
+  const user = getCurrentUser();
+  return user ? `learntra-portfolio:${user.id}` : "learntra-portfolio:guest";
+};
+
+function loadState() {
   try {
-    return { ...init, ...JSON.parse(localStorage.getItem(KEY)) };
-  } catch {
-    return init;
+    const stored = localStorage.getItem(storageKey());
+    if (stored) return { ...initialState(), ...JSON.parse(stored) };
+    // Keep an existing pre-account demo portfolio available to visitors once.
+    if (!getCurrentUser() && localStorage.getItem(LEGACY_KEY)) {
+      const legacy = JSON.parse(localStorage.getItem(LEGACY_KEY));
+      localStorage.setItem(storageKey(), JSON.stringify(legacy));
+      return { ...initialState(), ...legacy };
+    }
+  } catch (error) {
+    console.warn("Could not load saved portfolio:", error);
   }
-})();
-const subs = new Set(),
-  emit = () => {
-    try {
-      localStorage.setItem(KEY, JSON.stringify(st));
-    } catch {}
-    subs.forEach((f) => f());
-  };
+  return initialState();
+}
+
+let st = loadState();
+const subs = new Set();
+const emit = () => {
+  try {
+    localStorage.setItem(storageKey(), JSON.stringify(st));
+  } catch (error) {
+    console.warn("Could not save portfolio:", error);
+  }
+  subs.forEach((listener) => listener());
+};
+const reloadForAccount = () => {
+  st = loadState();
+  subs.forEach((listener) => listener());
+};
+if (typeof window !== "undefined") {
+  window.addEventListener("learntra-auth-change", reloadForAccount);
+  window.addEventListener("storage", (event) => {
+    if (event.key === storageKey()) reloadForAccount();
+  });
+}
+
 export const useStore = () =>
   useSyncExternalStore(
-    (f) => {
-      subs.add(f);
-      return () => subs.delete(f);
+    (listener) => {
+      subs.add(listener);
+      return () => subs.delete(listener);
     },
     () => st,
+    () => initialState(),
   );
-// returns '' on success, otherwise an error message
+
+// Returns an empty string on success, otherwise a user-friendly error.
 export function trade(side, sym, qty, price) {
-  if (!(qty > 0)) return "Enter a valid quantity.";
-  const total = qty * price,
-    h = st.hold[sym] || { q: 0, avg: 0 };
-  let hold = { ...st.hold },
-    cash = st.cash,
-    real = st.real || 0;
+  if (!(qty > 0) || !Number.isFinite(qty)) return "Enter a valid quantity.";
+  if (!(price > 0) || !Number.isFinite(price)) return "The current price is invalid.";
+  const total = qty * price;
+  const holding = st.hold[sym] || { q: 0, avg: 0 };
+  const hold = { ...st.hold };
+  let cash = st.cash;
+  let real = st.real || 0;
+
   if (side === "BUY") {
     if (total > cash) return "Not enough virtual cash.";
-    const q = h.q + qty;
-    hold[sym] = { q, avg: (h.avg * h.q + total) / q };
+    const quantity = holding.q + qty;
+    hold[sym] = { q: quantity, avg: (holding.avg * holding.q + total) / quantity };
     cash -= total;
   } else {
-    if (h.q < qty) return "You do not hold that many shares.";
-    real += (price - h.avg) * qty;
+    if (holding.q < qty) return "You do not hold that many shares.";
+    real += (price - holding.avg) * qty;
     cash += total;
-    const q = h.q - qty;
-    if (q === 0) delete hold[sym];
-    else hold[sym] = { q, avg: h.avg };
+    const quantity = holding.q - qty;
+    if (quantity === 0) delete hold[sym];
+    else hold[sym] = { q: quantity, avg: holding.avg };
   }
+
   st = {
     ...st,
     cash,
@@ -56,34 +91,41 @@ export function trade(side, sym, qty, price) {
   emit();
   return "";
 }
+
 export const resetPortfolio = () => {
-  st = init;
+  st = initialState();
   emit();
 };
-// mock price feed: base price with a small deterministic wobble that changes every few seconds
-export const livePrice = (b, i, t) =>
-  b * (1 + 0.005 * Math.sin(t * 0.7 + i * 1.7));
+
+export const livePrice = (basePrice, index, tick) =>
+  basePrice * (1 + 0.005 * Math.sin(tick * 0.7 + index * 1.7));
+
 export const useTick = () => {
-  const [t, s] = useState(0);
+  const [tick, setTick] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => s((x) => x + 1), 3000);
+    const id = setInterval(() => setTick((value) => value + 1), 3000);
     return () => clearInterval(id);
   }, []);
-  return t;
+  return tick;
 };
+
 export function usePortfolio() {
-  const st = useStore(),
-    tick = useTick();
-  const rows = Object.entries(st.hold).map(([s, h]) => {
-    const i = Math.max(
-        0,
-        assets.findIndex((a) => a[0] === s),
-      ),
-      p = livePrice(assets[i][1], i, tick);
-    return { s, q: h.q, avg: h.avg, p, v: p * h.q, pl: (p - h.avg) * h.q };
+  const state = useStore();
+  const tick = useTick();
+  const rows = Object.entries(state.hold).map(([symbol, holding]) => {
+    const index = Math.max(0, assets.findIndex((asset) => asset[0] === symbol));
+    const price = livePrice(assets[index][1], index, tick);
+    return {
+      s: symbol,
+      q: holding.q,
+      avg: holding.avg,
+      p: price,
+      v: price * holding.q,
+      pl: (price - holding.avg) * holding.q,
+    };
   });
-  const val = rows.reduce((a, r) => a + r.v, 0),
-    unreal = rows.reduce((a, r) => a + r.pl, 0),
-    eq = st.cash + val;
-  return { st, tick, rows, val, unreal, eq, total: eq - START, start: START };
+  const val = rows.reduce((sum, row) => sum + row.v, 0);
+  const unreal = rows.reduce((sum, row) => sum + row.pl, 0);
+  const eq = state.cash + val;
+  return { st: state, tick, rows, val, unreal, eq, total: eq - START, start: START };
 }

@@ -1,5 +1,6 @@
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
+import { logoutUser, useAuth } from "../data/auth.js";
 import { Rocket, Moon, Sun, Menu, ChevronDown } from "lucide-react";
 import "./Navbar.css";
 
@@ -43,6 +44,8 @@ const groups = [
 
 export default function Navbar() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const user = useAuth();
 
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openGroup, setOpenGroup] = useState(null);
@@ -124,13 +127,11 @@ export default function Navbar() {
 
           {/* MOBILE LOGIN */}
           <div className="mobile-auth">
-            <Link
-              to="/login"
-              className="btn p"
-              onClick={() => setMobileOpen(false)}
-            >
-              Login / Sign Up
-            </Link>
+            {user ? (
+              <button className="btn p" onClick={() => { logoutUser(); setMobileOpen(false); navigate("/"); }}>Log out ({user.name})</button>
+            ) : (
+              <Link to="/login" className="btn p" onClick={() => setMobileOpen(false)}>Login / Sign Up</Link>
+            )}
           </div>
         </nav>
 
@@ -148,10 +149,15 @@ export default function Navbar() {
             {darkMode ? <Sun size={20} /> : <Moon size={20} />}
           </button>
 
-          {/* LOGIN */}
-          <Link to="/login" className="btn p sm">
-            Login / Sign Up
-          </Link>
+          {/* ACCOUNT */}
+          {user ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+              <span className="tiny" title={user.email}>Hi, {user.name}</span>
+              <button className="btn p sm" onClick={() => { logoutUser(); navigate("/"); }}>Log out</button>
+            </div>
+          ) : (
+            <Link to="/login" className="btn p sm">Login / Sign Up</Link>
+          )}
 
           {/* MOBILE MENU */}
           <button
