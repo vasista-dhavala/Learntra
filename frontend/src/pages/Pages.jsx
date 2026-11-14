@@ -5,7 +5,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { useState } from "react";
-import { loginUser, registerUser } from "../data/auth.js";
+import { loginUser, registerUser, useAuth, logoutUser } from "../data/auth.js";
 import StockChart, { Spark } from "../components/StockChart.jsx";
 import {
   movers,
@@ -1010,3 +1010,138 @@ export const NotFound = () => (
     </Link>
   </main>
 );
+
+export function Profile() {
+  const user = useAuth();
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleLogout = async () => {
+    setBusy(true);
+    setError("");
+
+    try {
+      await logoutUser();
+      navigate("/", { replace: true });
+    } catch (err) {
+      setError(err.message || "Unable to log out.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!user) {
+    return (
+      <main className="wrap page">
+        <Head
+          t="Your Profile"
+          s="Log in to view your Learntra account."
+        />
+        <div className="card">
+          <Link to="/login" className="btn p">
+            Login
+          </Link>
+          <Link to="/signup" className="btn">
+            Create Account
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="wrap page">
+      <Head
+        t={`Welcome, ${user.name || "Learner"}!`}
+        s="Your personal Learntra account dashboard."
+      />
+
+      {/* PROFILE DETAILS */}
+      <div className="card" style={{ maxWidth: 700 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: "50%",
+              background: "#2563eb",
+              color: "white",
+              display: "grid",
+              placeItems: "center",
+              fontSize: 28,
+              fontWeight: 700,
+            }}
+          >
+            {(user.name || "L").charAt(0).toUpperCase()}
+          </div>
+
+          <div>
+            <h2 style={{ margin: 0 }}>
+              {user.name || "Learntra Learner"}
+            </h2>
+            <p className="mu" style={{ margin: "5px 0" }}>
+              {user.email}
+            </p>
+          </div>
+        </div>
+
+        <hr style={{ margin: "20px 0", opacity: 0.2 }} />
+
+        <div className="row">
+          <span>Full Name</span>
+          <b>{user.name || "Not provided"}</b>
+        </div>
+
+        <div className="row">
+          <span>Email Address</span>
+          <b>{user.email}</b>
+        </div>
+
+        <div className="row">
+          <span>Age Group</span>
+          <b>{user.ageGroup || "Not provided"}</b>
+        </div>
+
+        <div className="row">
+          <span>Account ID</span>
+          <span className="tiny">{user.id}</span>
+        </div>
+      </div>
+
+      {/* QUICK LINKS */}
+      <h3 style={{ marginTop: 24 }}>Quick Access</h3>
+
+      <div className="g3">
+        <Link to="/invest" className="card">
+          <h3>Investment Dashboard</h3>
+          <p className="mu">Explore markets and investment simulations.</p>
+        </Link>
+
+        <Link to="/portfolio" className="card">
+          <h3>My Portfolio</h3>
+          <p className="mu">View virtual holdings and performance.</p>
+        </Link>
+
+        <Link to="/personal-finance/financial-plan" className="card">
+          <h3>Financial Planning</h3>
+          <p className="mu">Create your financial plan.</p>
+        </Link>
+      </div>
+
+      {/* LOGOUT */}
+      <div className="card" style={{ marginTop: 24 }}>
+        {error && <p className="dn">{error}</p>}
+
+        <button
+          className="btn p"
+          onClick={handleLogout}
+          disabled={busy}
+        >
+          {busy ? "Logging out..." : "Log Out"}
+        </button>
+      </div>
+    </main>
+  );
+}
+

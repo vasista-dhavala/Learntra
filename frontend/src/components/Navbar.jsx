@@ -1,3 +1,4 @@
+
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { logoutUser, useAuth } from "../data/auth.js";
@@ -56,7 +57,6 @@ export default function Navbar() {
 
   useEffect(() => {
     document.body.classList.toggle("dark-theme", darkMode);
-
     localStorage.setItem("learntra-theme", darkMode ? "dark" : "light");
   }, [darkMode]);
 
@@ -71,11 +71,26 @@ export default function Navbar() {
     setOpenGroup((current) => (current === label ? null : label));
   };
 
+  const handleLogout = async () => {
+    try {
+      await logoutUser();
+      setMobileOpen(false);
+      setOpenGroup(null);
+      navigate("/");
+    } catch (error) {
+      console.error("Logout failed:", error.message);
+    }
+  };
+
   return (
     <header className="nav">
       <div className="wrap nav-inner">
         {/* LOGO */}
-        <Link to="/" className="brand" onClick={() => setMobileOpen(false)}>
+        <Link
+          to="/"
+          className="brand"
+          onClick={() => setMobileOpen(false)}
+        >
           <Rocket color="#2563eb" size={28} />
           <span>Learntra</span>
         </Link>
@@ -125,15 +140,36 @@ export default function Navbar() {
             );
           })}
 
-          {/* MOBILE LOGIN */}
-          <div className="mobile-auth">
-            {user ? (
-              <button className="btn p" onClick={() => { logoutUser(); setMobileOpen(false); navigate("/"); }}>Log out ({user.name})</button>
-            ) : (
-              <Link to="/login" className="btn p" onClick={() => setMobileOpen(false)}>Login / Sign Up</Link>
-            )}
-          </div>
-        </nav>
+            {/* MOBILE ACCOUNT */}
+            <div className="mobile-auth">
+              {user ? (
+                <>
+                  <Link
+                    to="/profile"
+                    className="btn p"
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    My Profile
+                  </Link>
+
+                  <button
+                    className="btn p"
+                    onClick={handleLogout}
+                  >
+                    Log out
+                  </button>
+                </>
+              ) : (
+                <Link
+                  to="/login"
+                  className="btn p"
+                  onClick={() => setMobileOpen(false)}
+                >
+                  Login / Sign Up
+                </Link>
+              )}
+            </div>
+          </nav>
 
         {/* RIGHT SIDE */}
         <div className="right">
@@ -152,11 +188,21 @@ export default function Navbar() {
           {/* ACCOUNT */}
           {user ? (
             <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-              <span className="tiny" title={user.email}>Hi, {user.name}</span>
-              <button className="btn p sm" onClick={() => { logoutUser(); navigate("/"); }}>Log out</button>
+              <Link to="/profile" className="btn p sm">
+                My Profile
+              </Link>
+
+              <button
+                className="btn p sm"
+                onClick={handleLogout}
+              >
+                Log out
+              </button>
             </div>
           ) : (
-            <Link to="/login" className="btn p sm">Login / Sign Up</Link>
+            <Link to="/login" className="btn p sm">
+              Login / Sign Up
+            </Link>
           )}
 
           {/* MOBILE MENU */}

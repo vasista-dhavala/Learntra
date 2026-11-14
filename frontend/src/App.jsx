@@ -39,6 +39,10 @@ const AboutPage = lazyNamed(() => import("./pages/Pages.jsx"), "About");
 const LoginPage = lazyNamed(() => import("./pages/Pages.jsx"), "Login");
 const SignupPage = lazyNamed(() => import("./pages/Pages.jsx"), "Signup");
 const NotFoundPage = lazyNamed(() => import("./pages/Pages.jsx"), "NotFound");
+const ProfilePage = lazyNamed(
+  () => import("./pages/Pages.jsx"),
+  "Profile"
+);
 
 /* FinancePages.jsx exports */
 const NewsMarketsPage = lazyNamed(() => import("./pages/FinancePages.jsx"), "NewsMarkets");
@@ -124,6 +128,7 @@ export default function App() {
             {/* AUTH */}
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
+            <Route path="/profile" element={<ProfilePage />} />
 
             {/* 404 */}
             <Route path="/404" element={<NotFoundPage />} />
