@@ -84,7 +84,7 @@
   padding: 0;
   border: 0;
   background: transparent;
-  cursor: pointer;
+  cursor: grab;
   color: #172033;
   font-size: 13px;
   font-weight: 700;
@@ -127,7 +127,7 @@
 
 .nav-dropdown {
   position: absolute;
-  top: calc(100% + 10px);
+  top: 100%;
   left: 50%;
   transform: translateX(-50%) translateY(-6px);
   width: 245px;
@@ -162,6 +162,17 @@
   border-left: 1px solid var(--bd);
   border-top: 1px solid var(--bd);
   transform: translateX(-50%) rotate(45deg);
+}
+
+/* Invisible hover bridge prevents dropdown from closing */
+.nav-dropdown::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -12px;
+  height: 12px;
+  background: transparent;
 }
 
 .nav-group:hover .nav-dropdown,
