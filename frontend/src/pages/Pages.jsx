@@ -24,6 +24,15 @@ import {
 } from "../data/store.js";
 import { inr, sgn, Chg, Demo, Head, Stat } from "../utils/helpers.jsx";
 import "./Pages.css";
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+const formatStockPrice = (price, currency = "INR") =>
+  new Intl.NumberFormat("en", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2,
+  }).format(price);
+
 const Table = ({ rows }) => (
   <div className="card">
     {rows.map((r) => (
@@ -718,32 +727,51 @@ export function Save() {
   );
 }
 
-const StockCard = ({ x }) => (
+const StockCard = ({ x, market, loading }) => (
   <div className="card" style={{ display: "grid", gap: 8 }}>
     <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
       <div>
         <b>{x.s}</b>
         <div className="tiny">{x.n}</div>
       </div>
-      <span className="pill" style={{ alignSelf: "start" }}>
-        {x.sec}
-      </span>
+      {(market?.exchange || x.sec) && (
+        <span className="pill" style={{ alignSelf: "start" }}>
+          {market?.exchange || x.sec}
+        </span>
+      )}
     </div>
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "end",
-      }}
-    >
-      <div>
-        <div className="big" style={{ margin: 0 }}>
-          {inr(x.p)}
+    {market && !market.error ? (
+      <>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "end",
+          }}
+        >
+          <div>
+            <div className="big" style={{ margin: 0 }}>
+              {formatStockPrice(market.price, market.currency)}
+            </div>
+            <div className="tiny">
+              {market.price_type === "latest_close" ? "Latest close" : "Market quote"}
+              {" · "}
+              {market.as_of}
+            </div>
+          </div>
+          {market.change_percent != null && <Chg c={market.change_percent} />}
         </div>
-        <Chg c={x.c} />
-      </div>
-      <Spark up={x.c >= 0} />
-    </div>
+        {market.history?.length ? (
+          <StockChart h={125} history={market.history} />
+        ) : (
+          <p className="mu">Historical chart unavailable.</p>
+        )}
+      </>
+    ) : (
+      <p className={market?.error ? "dn" : "mu"}>
+        {market?.error || (loading ? "Loading market data..." : "Market data unavailable.")}
+      </p>
+    )}
     <Link
       to={`/invest/simulation?asset=${x.s}`}
       className="btn sm"
@@ -759,6 +787,9 @@ export function Markets() {
   const [apiStocks, setApiStocks] = useState([]);
   const [searchError, setSearchError] = useState("");
   const [searching, setSearching] = useState(false);
+  const [marketData, setMarketData] = useState({});
+  const [marketDataError, setMarketDataError] = useState("");
+  const [loadingMarketData, setLoadingMarketData] = useState(false);
 
   useEffect(() => {
     const query = q.trim();
@@ -776,9 +807,10 @@ export function Markets() {
       try {
         setSearching(true);
         setSearchError("");
+        setApiStocks([]);
 
         const response = await fetch(
-          `http://127.0.0.1:8000/stocks/search?q=${encodeURIComponent(query)}`,
+          `${API_BASE_URL}/stocks/search?q=${encodeURIComponent(query)}`,
           { signal: controller.signal },
         );
 
@@ -812,6 +844,52 @@ export function Markets() {
       (s.s + " " + s.n).toLowerCase().includes(q.toLowerCase()),
   );
   const pop = stocks.filter((s) => popular.includes(s.s));
+  const marketSymbols = showingApiResults
+    ? apiStocks.map((stock) => stock.symbol)
+    : [...stocks.map((stock) => stock.s), ...indices.map(([symbol]) => symbol)];
+  const marketSymbolsKey = marketSymbols.join(",");
+
+  useEffect(() => {
+    if (!marketSymbolsKey) {
+      setMarketData({});
+      setMarketDataError("");
+      setLoadingMarketData(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setLoadingMarketData(true);
+    setMarketDataError("");
+
+    fetch(
+      `${API_BASE_URL}/stocks/market-data?symbols=${encodeURIComponent(marketSymbolsKey)}`,
+      { signal: controller.signal },
+    )
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("Market data request failed.");
+        }
+        return response.json();
+      })
+      .then((data) => {
+        setMarketData(
+          Object.fromEntries(data.results.map((item) => [item.symbol, item])),
+        );
+      })
+      .catch((error) => {
+        if (error.name !== "AbortError") {
+          setMarketData({});
+          setMarketDataError("Unable to load market data. Please try again.");
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoadingMarketData(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [marketSymbolsKey]);
 
   return (
     <main className="wrap page">
@@ -844,6 +922,9 @@ export function Markets() {
 
       {/* SEARCH RESULTS (right under the search bar) */}
       <h3>Stocks ({showingApiResults ? apiStocks.length : list.length})</h3>
+      <p className="tiny">
+        Prices and daily history from Yahoo Finance; quotes may be delayed.
+      </p>
       {searching ? (
         <p className="mu" style={{ margin: "12px 0" }}>
           Searching stocks...
@@ -855,19 +936,16 @@ export function Markets() {
       ) : showingApiResults && apiStocks.length ? (
         <div className="g3">
           {apiStocks.map((stock) => (
-            <Link
-              to={`/invest/simulation?asset=${encodeURIComponent(stock.symbol)}`}
-              className="card"
+            <StockCard
               key={stock.symbol}
-              style={{ display: "grid", gap: 8 }}
-            >
-              <b>{stock.symbol}</b>
-              <div className="tiny">{stock.name}</div>
-              <span className="pill">{stock.exchange}</span>
-              <span className="btn sm" style={{ justifyContent: "center" }}>
-                Trade
-              </span>
-            </Link>
+              x={{
+                s: stock.symbol.replace(/\.(NS|BO)$/i, ""),
+                n: stock.name,
+                sec: stock.exchange,
+              }}
+              market={marketData[stock.symbol]}
+              loading={loadingMarketData}
+            />
           ))}
         </div>
       ) : showingApiResults ? (
@@ -877,12 +955,22 @@ export function Markets() {
       ) : list.length ? (
         <div className="g3">
           {list.map((s) => (
-            <StockCard key={s.s} x={s} />
+            <StockCard
+              key={s.s}
+              x={s}
+              market={marketData[s.s]}
+              loading={loadingMarketData}
+            />
           ))}
         </div>
       ) : (
         <p className="mu" style={{ margin: "12px 0" }}>
           No stocks match your search.
+        </p>
+      )}
+      {marketDataError && (
+        <p className="dn" style={{ margin: "12px 0" }}>
+          {marketDataError}
         </p>
       )}
 
@@ -894,8 +982,26 @@ export function Markets() {
             {indices.map((i) => (
               <div className="card" key={i[0]}>
                 <div className="tiny">{i[0]}</div>
-                <div className="big">{i[1]}</div>
-                <Chg c={i[2]} />
+                {marketData[i[0]] && !marketData[i[0]].error ? (
+                  <>
+                    <div className="big">
+                      {formatStockPrice(
+                        marketData[i[0]].price,
+                        marketData[i[0]].currency,
+                      )}
+                    </div>
+                    {marketData[i[0]].change_percent != null && (
+                      <Chg c={marketData[i[0]].change_percent} />
+                    )}
+                    <StockChart h={105} history={marketData[i[0]].history} />
+                  </>
+                ) : (
+                  <p className="mu">
+                    {loadingMarketData
+                      ? "Loading market data..."
+                      : "Market data unavailable."}
+                  </p>
+                )}
               </div>
             ))}
           </div>
@@ -903,48 +1009,74 @@ export function Markets() {
           <h3>Popular stocks</h3>
           <div className="g3">
             {pop.map((s) => (
-              <Link
-                to={`/invest/simulation?asset=${s.s}`}
-                className="card"
+              <StockCard
                 key={s.s}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <div>
-                  <b>{s.s}</b>
-                  <div className="tiny">{inr(s.p)}</div>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <Chg c={s.c} />
-                  <br />
-                  <Spark up={s.c >= 0} w={50} />
-                </div>
-              </Link>
+                x={s}
+                market={marketData[s.s]}
+                loading={loadingMarketData}
+              />
             ))}
           </div>
 
           <div className="g2">
             <div className="card">
               <b>NIFTY 50</b>
-              <StockChart />
+              {marketData["NIFTY 50"] && !marketData["NIFTY 50"].error ? (
+                <>
+                  <div className="big">
+                    {formatStockPrice(
+                      marketData["NIFTY 50"].price,
+                      marketData["NIFTY 50"].currency,
+                    )}
+                  </div>
+                  <StockChart history={marketData["NIFTY 50"].history} />
+                </>
+              ) : (
+                <p className="mu">
+                  {loadingMarketData
+                    ? "Loading market data..."
+                    : "NIFTY 50 data unavailable."}
+                </p>
+              )}
             </div>
             <div>
               <h3>Top gainers</h3>
               <Table
-                rows={[...stocks]
-                  .sort((a, b) => b.c - a.c)
+                rows={stocks
+                  .filter((stock) => marketData[stock.s]?.change_percent != null)
+                  .sort(
+                    (a, b) =>
+                      marketData[b.s].change_percent -
+                      marketData[a.s].change_percent,
+                  )
                   .slice(0, 4)
-                  .map((a) => [a.s, inr(a.p), a.c])}
+                  .map((stock) => [
+                    stock.s,
+                    formatStockPrice(
+                      marketData[stock.s].price,
+                      marketData[stock.s].currency,
+                    ),
+                    marketData[stock.s].change_percent,
+                  ])}
               />
               <h3 style={{ marginTop: 16 }}>Top losers</h3>
               <Table
-                rows={[...stocks]
-                  .sort((a, b) => a.c - b.c)
+                rows={stocks
+                  .filter((stock) => marketData[stock.s]?.change_percent != null)
+                  .sort(
+                    (a, b) =>
+                      marketData[a.s].change_percent -
+                      marketData[b.s].change_percent,
+                  )
                   .slice(0, 3)
-                  .map((a) => [a.s, inr(a.p), a.c])}
+                  .map((stock) => [
+                    stock.s,
+                    formatStockPrice(
+                      marketData[stock.s].price,
+                      marketData[stock.s].currency,
+                    ),
+                    marketData[stock.s].change_percent,
+                  ])}
               />
             </div>
           </div>
