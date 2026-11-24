@@ -4,7 +4,7 @@ import {
   useNavigate,
   useSearchParams,
 } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { loginUser, registerUser, useAuth, logoutUser } from "../data/auth.js";
 import StockChart, { Spark } from "../components/StockChart.jsx";
 import {
@@ -756,12 +756,63 @@ const StockCard = ({ x }) => (
 export function Markets() {
   const [q, setQ] = useState(""),
     [tab, setTab] = useState("All");
+  const [apiStocks, setApiStocks] = useState([]);
+  const [searchError, setSearchError] = useState("");
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    const query = q.trim();
+
+    if (query.length < 2) {
+      setApiStocks([]);
+      setSearchError("");
+      setSearching(false);
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const timer = setTimeout(async () => {
+      try {
+        setSearching(true);
+        setSearchError("");
+
+        const response = await fetch(
+          `http://127.0.0.1:8000/stocks/search?q=${encodeURIComponent(query)}`,
+          { signal: controller.signal },
+        );
+
+        if (!response.ok) {
+          throw new Error("Stock search failed.");
+        }
+
+        const data = await response.json();
+        setApiStocks(data.results || []);
+      } catch (error) {
+        if (error.name !== "AbortError") {
+          setSearchError("Unable to search stocks. Please try again.");
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setSearching(false);
+        }
+      }
+    }, 350);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [q]);
+
+  const showingApiResults = q.trim().length >= 2;
   const list = stocks.filter(
-      (s) =>
-        (tab === "All" || s.r === tab) &&
-        (s.s + " " + s.n).toLowerCase().includes(q.toLowerCase()),
-    ),
-    pop = stocks.filter((s) => popular.includes(s.s));
+    (s) =>
+      (tab === "All" || s.r === tab) &&
+      (s.s + " " + s.n).toLowerCase().includes(q.toLowerCase()),
+  );
+  const pop = stocks.filter((s) => popular.includes(s.s));
+
   return (
     <main className="wrap page">
       <Head
@@ -769,6 +820,8 @@ export function Markets() {
         s="Search stocks, track indices and jump into a trade."
       />
       <Demo />
+
+      {/* SEARCH BAR */}
       <div className="cta" style={{ margin: "18px 0" }}>
         <input
           style={{ maxWidth: 300 }}
@@ -788,43 +841,40 @@ export function Markets() {
           ))}
         </div>
       </div>
-      <h3>Market indices</h3>
-      <div className="g3">
-        {indices.map((i) => (
-          <div className="card" key={i[0]}>
-            <div className="tiny">{i[0]}</div>
-            <div className="big">{i[1]}</div>
-            <Chg c={i[2]} />
-          </div>
-        ))}
-      </div>
-      <h3>Popular stocks</h3>
-      <div className="g3">
-        {pop.map((s) => (
-          <Link
-            to={`/invest/simulation?asset=${s.s}`}
-            className="card"
-            key={s.s}
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <div>
-              <b>{s.s}</b>
-              <div className="tiny">{inr(s.p)}</div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <Chg c={s.c} />
-              <br />
-              <Spark up={s.c >= 0} w={50} />
-            </div>
-          </Link>
-        ))}
-      </div>
-      <h3>Stocks ({list.length})</h3>
-      {list.length ? (
+
+      {/* SEARCH RESULTS (right under the search bar) */}
+      <h3>Stocks ({showingApiResults ? apiStocks.length : list.length})</h3>
+      {searching ? (
+        <p className="mu" style={{ margin: "12px 0" }}>
+          Searching stocks...
+        </p>
+      ) : searchError ? (
+        <p className="dn" style={{ margin: "12px 0" }}>
+          {searchError}
+        </p>
+      ) : showingApiResults && apiStocks.length ? (
+        <div className="g3">
+          {apiStocks.map((stock) => (
+            <Link
+              to={`/invest/simulation?asset=${encodeURIComponent(stock.symbol)}`}
+              className="card"
+              key={stock.symbol}
+              style={{ display: "grid", gap: 8 }}
+            >
+              <b>{stock.symbol}</b>
+              <div className="tiny">{stock.name}</div>
+              <span className="pill">{stock.exchange}</span>
+              <span className="btn sm" style={{ justifyContent: "center" }}>
+                Trade
+              </span>
+            </Link>
+          ))}
+        </div>
+      ) : showingApiResults ? (
+        <p className="mu" style={{ margin: "12px 0" }}>
+          No stocks match your search.
+        </p>
+      ) : list.length ? (
         <div className="g3">
           {list.map((s) => (
             <StockCard key={s.s} x={s} />
@@ -835,28 +885,71 @@ export function Markets() {
           No stocks match your search.
         </p>
       )}
-      <div className="g2">
-        <div className="card">
-          <b>NIFTY 50</b>
-          <StockChart />
-        </div>
-        <div>
-          <h3>Top gainers</h3>
-          <Table
-            rows={[...stocks]
-              .sort((a, b) => b.c - a.c)
-              .slice(0, 4)
-              .map((a) => [a.s, inr(a.p), a.c])}
-          />
-          <h3 style={{ marginTop: 16 }}>Top losers</h3>
-          <Table
-            rows={[...stocks]
-              .sort((a, b) => a.c - b.c)
-              .slice(0, 3)
-              .map((a) => [a.s, inr(a.p), a.c])}
-          />
-        </div>
-      </div>
+
+      {/* HIDDEN WHILE SEARCHING */}
+      {!showingApiResults && (
+        <>
+          <h3 style={{ marginTop: 24 }}>Market indices</h3>
+          <div className="g3">
+            {indices.map((i) => (
+              <div className="card" key={i[0]}>
+                <div className="tiny">{i[0]}</div>
+                <div className="big">{i[1]}</div>
+                <Chg c={i[2]} />
+              </div>
+            ))}
+          </div>
+
+          <h3>Popular stocks</h3>
+          <div className="g3">
+            {pop.map((s) => (
+              <Link
+                to={`/invest/simulation?asset=${s.s}`}
+                className="card"
+                key={s.s}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
+                <div>
+                  <b>{s.s}</b>
+                  <div className="tiny">{inr(s.p)}</div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <Chg c={s.c} />
+                  <br />
+                  <Spark up={s.c >= 0} w={50} />
+                </div>
+              </Link>
+            ))}
+          </div>
+
+          <div className="g2">
+            <div className="card">
+              <b>NIFTY 50</b>
+              <StockChart />
+            </div>
+            <div>
+              <h3>Top gainers</h3>
+              <Table
+                rows={[...stocks]
+                  .sort((a, b) => b.c - a.c)
+                  .slice(0, 4)
+                  .map((a) => [a.s, inr(a.p), a.c])}
+              />
+              <h3 style={{ marginTop: 16 }}>Top losers</h3>
+              <Table
+                rows={[...stocks]
+                  .sort((a, b) => a.c - b.c)
+                  .slice(0, 3)
+                  .map((a) => [a.s, inr(a.p), a.c])}
+              />
+            </div>
+          </div>
+        </>
+      )}
     </main>
   );
 }
