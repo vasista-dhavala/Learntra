@@ -152,8 +152,8 @@ export function Simulation() {
     p = livePrice(base, sym, tick),
     tot = p * qty,
     h = st.hold[s];
-  const go = () => {
-    const e = trade(side, s, qty, p);
+  const go = async () => {
+    const e = await trade(side, s, qty, p);
     setErr(e);
     if (!e) {
       setOk(false);
@@ -328,10 +328,11 @@ export function Portfolio() {
         </Link>
         <button
           className="btn sm"
-          onClick={() =>
-            window.confirm("Reset your virtual portfolio to ₹1,00,000?") &&
-            resetPortfolio()
-          }
+          onClick={async () => {
+            if (!window.confirm("Reset your virtual portfolio to ₹1,00,000?")) return;
+            const error = await resetPortfolio();
+            if (error) window.alert(error);
+          }}
         >
           Reset portfolio
         </button>
