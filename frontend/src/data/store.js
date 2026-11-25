@@ -1,7 +1,7 @@
-import { useSyncExternalStore, useState, useEffect } from "react";
-import { assets } from "./data.js";
+import { useSyncExternalStore } from "react";
 import { getCurrentUser, subscribeAuth } from "./auth.js";
 import { supabase } from "../lib/supabase.js";
+import { useMarketQuotes } from "./useMarketData.js";
 
 const START = 100000;
 const LEGACY_KEY = "learntra-portfolio";
@@ -246,26 +246,17 @@ export const resetPortfolio = async () => {
   return "";
 };
 
-export const livePrice = (basePrice, index, tick) =>
-  basePrice * (1 + 0.005 * Math.sin(tick * 0.7 + index * 1.7));
-export const useTick = () => {
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick((value) => value + 1), 3000);
-    return () => clearInterval(id);
-  }, []);
-  return tick;
-};
 export function usePortfolio() {
   const state = useStore();
-  const tick = useTick();
+  const { quotes, loading: pricesLoading, error: pricesError, updatedAt } = useMarketQuotes(Object.keys(state.hold));
   const rows = Object.entries(state.hold).map(([symbol, holding]) => {
-    const index = Math.max(0, assets.findIndex((asset) => asset[0] === symbol));
-    const price = livePrice(assets[index][1], index, tick);
-    return { s: symbol, q: holding.q, avg: holding.avg, p: price, v: price * holding.q, pl: (price - holding.avg) * holding.q };
+    const quote = quotes[symbol];
+    const price = quote?.error ? null : Number(quote?.price);
+    const valid = Number.isFinite(price) && price > 0;
+    return { s: symbol, q: holding.q, avg: holding.avg, p: valid ? price : null, v: valid ? price * holding.q : null, pl: valid ? (price - holding.avg) * holding.q : null, currency: quote?.currency };
   });
-  const val = rows.reduce((sum, row) => sum + row.v, 0);
-  const unreal = rows.reduce((sum, row) => sum + row.pl, 0);
+  const val = rows.reduce((sum, row) => sum + (row.v ?? 0), 0);
+  const unreal = rows.reduce((sum, row) => sum + (row.pl ?? 0), 0);
   const eq = state.cash + val;
-  return { st: state, tick, rows, val, unreal, eq, total: eq - START, start: START };
+  return { st: state, rows, val, unreal, eq, total: eq - START, start: START, pricesLoading, pricesError, pricesUpdatedAt: updatedAt, hasUnavailablePrices: rows.some((row) => row.p == null) };
 }

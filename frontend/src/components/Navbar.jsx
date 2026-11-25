@@ -1,7 +1,8 @@
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { Rocket, Moon, Sun, Menu, ChevronDown } from "lucide-react";
 import "./Navbar.css";
+import { logoutUser, useAuth } from "../data/auth.js";
 
 const groups = [
   {
@@ -42,6 +43,8 @@ const groups = [
 
 export default function Navbar() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const user = useAuth();
 
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openGroup, setOpenGroup] = useState(null);
@@ -65,6 +68,16 @@ export default function Navbar() {
 
   const toggleGroup = (label) => {
     setOpenGroup((current) => (current === label ? null : label));
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logoutUser();
+      setMobileOpen(false);
+      navigate("/", { replace: true });
+    } catch (error) {
+      console.error("Unable to log out:", error);
+    }
   };
 
   return (
@@ -123,13 +136,18 @@ export default function Navbar() {
 
           {/* MOBILE LOGIN */}
           <div className="mobile-auth">
-            <Link
-              to="/login"
-              className="btn p"
-              onClick={() => setMobileOpen(false)}
-            >
-              Login / Sign Up
-            </Link>
+            {user ? (
+              <>
+                <Link to="/profile" className="btn p" onClick={() => setMobileOpen(false)}>
+                  {user.name || "My Profile"}
+                </Link>
+                <button className="btn" onClick={handleLogout}>Log Out</button>
+              </>
+            ) : (
+              <Link to="/login" className="btn p" onClick={() => setMobileOpen(false)}>
+                Login / Sign Up
+              </Link>
+            )}
           </div>
         </nav>
 
@@ -148,9 +166,14 @@ export default function Navbar() {
           </button>
 
           {/* LOGIN */}
-          <Link to="/login" className="btn p sm">
-            Login / Sign Up
-          </Link>
+          {user ? (
+            <>
+              <Link to="/profile" className="btn sm">{user.name || "Profile"}</Link>
+              <button className="btn p sm" onClick={handleLogout}>Log Out</button>
+            </>
+          ) : (
+            <Link to="/login" className="btn p sm">Login / Sign Up</Link>
+          )}
 
           {/* MOBILE MENU */}
           <button

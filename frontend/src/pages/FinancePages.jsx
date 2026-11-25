@@ -19,6 +19,7 @@ import {
 import StockChart, { Spark } from "../components/StockChart.jsx";
 import { stocks, indices, popular } from "../data/data.js";
 import { inr, Chg } from "../utils/helpers.jsx";
+import { useMarketQuotes } from "../data/useMarketData.js";
 import "./FinancePages.css";
 
 const Demo = () => (
@@ -213,6 +214,7 @@ const InvestingHero = ({ icon: Icon, title, description }) => (
 
 export function InvestingStocks() {
   const list = stocks.filter((x) => popular.includes(x.s));
+  const { quotes, loading, error, updatedAt } = useMarketQuotes(list.map((stock) => stock.s));
 
   return (
     <main className="wrap page">
@@ -222,7 +224,8 @@ export function InvestingStocks() {
         description="Understand stocks, track companies and practise trading with virtual money."
       />
 
-      <Demo />
+      <p className="tiny">{loading ? "Loading backend market data…" : updatedAt ? `Prices last updated ${updatedAt.toLocaleTimeString()}; provider data may be delayed.` : ""}</p>
+      {error && <p className="dn tiny">Market data unavailable: {error}</p>}
 
       <div className="g3">
         {list.map((s) => (
@@ -236,9 +239,9 @@ export function InvestingStocks() {
               <Spark up={s.c >= 0} />
             </div>
 
-            <div className="big">{inr(s.p)}</div>
+            <div className="big">{quotes[s.s]?.price != null ? inr(quotes[s.s].price) : "Unavailable"}</div>
 
-            <Chg c={s.c} />
+            {quotes[s.s]?.change_percent != null ? <Chg c={quotes[s.s].change_percent} /> : <span className="mu">Change unavailable</span>}
 
             <Link
               to={`/invest/simulation?asset=${s.s}`}

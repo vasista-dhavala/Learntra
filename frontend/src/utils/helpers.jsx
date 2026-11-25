@@ -21,9 +21,11 @@ export const sgn = (n) => (n >= 0 ? "+" : "") + inr(n);
  * Percentage change badge (green for positive, red for negative).
  */
 export const Chg = ({ c }) => (
-  <span className={c >= 0 ? "up" : "dn"}>
+  <span className={c == null ? "mu" : c >= 0 ? "up" : "dn"}>
+    {c == null ? "—" : <>
     {c >= 0 ? "+" : ""}
     {c.toFixed(2)}%
+    </>}
   </span>
 );
 

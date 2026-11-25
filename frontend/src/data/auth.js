@@ -63,7 +63,7 @@ export async function registerUser({ name, email, password, ageGroup }) {
     notify();
   }
 
-  return publicUser(data.user);
+  return { ...publicUser(data.user), hasSession: Boolean(data.session) };
 }
 
 // Login

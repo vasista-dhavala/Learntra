@@ -210,6 +210,15 @@ body.dark-theme .tab button.on {
 .market-order-message { margin-top:13px; color:#159d7d; font-size:12px; }
 .market-order-message.error { color:var(--rd); }
 .market-order-note { margin-top:12px; color:var(--mu); font-size:10px; text-align:center; }
+.market-chart-ranges { display:flex; flex-wrap:wrap; gap:6px; margin:14px 0 8px; }
+.market-chart-ranges button { border:1px solid var(--bd); border-radius:6px; background:transparent; padding:4px 8px; font-size:11px; cursor:pointer; }
+.market-chart-ranges button.active { background:#e8f0ff; border-color:#2563eb; color:#2563eb; }
+.market-chart-ranges button:disabled { cursor:not-allowed; opacity:.45; }
+.stock-chart { border:1px solid var(--bd); border-radius:10px; padding:10px; margin:10px 0; }
+.stock-chart-title { display:flex; justify-content:space-between; font-size:12px; margin-bottom:5px; }
+.stock-chart-caption { color:var(--mu); font-size:10px; text-align:right; }
+.chart-state { display:grid; place-items:center; color:var(--mu); border:1px dashed var(--bd); border-radius:10px; font-size:12px; }
+.chart-error { color:var(--rd); }
 body.dark-theme .market-stock-card,body.dark-theme .market-bond-card { box-shadow:none; }
 body.dark-theme .market-card-actions button { color:var(--tx); }
 body.dark-theme .market-card-actions button:last-child { color:#fff; }

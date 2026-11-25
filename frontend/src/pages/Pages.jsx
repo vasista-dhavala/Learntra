@@ -19,8 +19,9 @@ import {
   usePortfolio,
   trade,
   resetPortfolio,
-  livePrice,
 } from "../data/store.js";
+import { useMarketHistory, useMarketQuotes } from "../data/useMarketData.js";
+import { loginUser, logoutUser, registerUser, useAuth } from "../data/auth.js";
 import { inr, sgn, Chg, Demo, Head, Stat } from "../utils/helpers.jsx";
 import "./Pages.css";
 const Table = ({ rows }) => (
@@ -39,6 +40,8 @@ export function Invest() {
   const [q, setQ] = useState("");
   const P = usePortfolio();
   const f = assets.filter((a) => a[0].toLowerCase().includes(q.toLowerCase()));
+  const { quotes, loading, error, updatedAt } = useMarketQuotes(f.map((asset) => asset[0]));
+  const quotePrice = (symbol) => quotes[symbol]?.price;
   return (
     <main className="wrap page">
       <Head
@@ -56,8 +59,9 @@ export function Invest() {
       </div>
       <div className="g2">
         <div className="card">
-          <b>NIFTY 50</b> <span className="up">24,854.65 +0.68%</span>
-          <StockChart />
+          <b>Market data</b> <span className="mu">{loading ? "Loading quotes…" : "Backend quotes"}</span>
+          {error && <p className="dn tiny">{error}</p>}
+          {updatedAt && <p className="tiny">Last updated {updatedAt.toLocaleTimeString()} · provider data may be delayed</p>}
           <div className="cta" style={{ marginTop: 10 }}>
             <Link to="/invest/simulation" className="btn g sm">
               Buy
@@ -89,8 +93,8 @@ export function Invest() {
                 key={a[0]}
               >
                 <span>{a[0]}</span>
-                <span>{inr(a[1])}</span>
-                <Chg c={a[2]} />
+                <span>{quotePrice(a[0]) != null ? inr(quotePrice(a[0])) : "Unavailable"}</span>
+                {quotes[a[0]]?.change_percent != null ? <Chg c={quotes[a[0]].change_percent} /> : <span className="mu">—</span>}
               </Link>
             ))}
           </div>
@@ -99,7 +103,7 @@ export function Invest() {
       <div className="g2">
         <div>
           <h3>Top movers</h3>
-          <Table rows={movers.map((m) => [m.s, m.p, m.c])} />
+          <Table rows={movers.map((m) => [m.s, quotePrice(m.s) != null ? inr(quotePrice(m.s)) : "Unavailable", quotes[m.s]?.change_percent])} />
         </div>
         <div>
           <h3>Recent transactions</h3>
@@ -127,18 +131,9 @@ export function Invest() {
 export function Simulation() {
   const [sp] = useSearchParams();
   const P = usePortfolio();
-  const { st, tick } = P;
-  const indianStocks = stocks.filter((stock) => stock.r === "India");
+  const { st } = P;
+  const indianStocks = stocks;
   const indianAssets = indianStocks.map((stock) => [stock.s, stock.p, stock.c]);
-  const indianIndices = indices.filter(([name]) =>
-    [
-      "NIFTY 50",
-      "SENSEX",
-      "BANK NIFTY",
-      "NIFTY IT",
-      "NIFTY MIDCAP 100",
-    ].includes(name),
-  );
   const initialSymbol = indianStocks.some(
     (stock) => stock.s === sp.get("asset"),
   )
@@ -164,17 +159,24 @@ export function Simulation() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [chartPeriod, setChartPeriod] = useState("1mo");
+  const quoteSymbols = [...new Set(["TCS", "RELIANCE", "HDFCBANK", "INFY", ...watchlist, indianAssets[selected]?.[0], "NIFTY 50", "SENSEX", "S&P 500", "NASDAQ"].filter(Boolean))];
+  const { quotes, loading: quotesLoading, error: quotesError, updatedAt } = useMarketQuotes(quoteSymbols);
+  const indianIndices = ["NIFTY 50", "SENSEX", "S&P 500", "NASDAQ"].map((name) => [name, quotes[name]?.price, quotes[name]?.change_percent]);
+  const liveStocks = indianStocks.map((stock) => ({ ...stock, p: quotes[stock.s]?.price, c: quotes[stock.s]?.change_percent }));
 
-  const current = indianAssets[selected] || indianAssets[0];
+  const current = liveStocks[selected] ? [liveStocks[selected].s, liveStocks[selected].p, liveStocks[selected].c] : indianAssets[0];
   const [symbol, basePrice, change] = current;
-  const price = livePrice(basePrice, selected, tick);
-  const filteredStocks = indianStocks.filter((stock) =>
+  const price = Number(basePrice);
+  const { history, loading: historyLoading, error: historyError } = useMarketHistory(symbol, chartPeriod);
+  const displayPrice = (value) => Number.isFinite(Number(value)) && Number(value) > 0 ? inr(value) : "Unavailable";
+  const filteredStocks = liveStocks.filter((stock) =>
     `${stock.s} ${stock.n} ${stock.sec}`
       .toLowerCase()
       .includes(query.toLowerCase()),
   );
   const popularIndian = ["TCS", "RELIANCE", "HDFCBANK", "INFY"]
-    .map((ticker) => indianStocks.find((stock) => stock.s === ticker))
+    .map((ticker) => liveStocks.find((stock) => stock.s === ticker))
     .filter(Boolean);
   const bonds = [
     {
@@ -219,6 +221,11 @@ export function Simulation() {
     if (busy) return;
     setBusy(true);
     try {
+      if (!Number.isFinite(price) || price <= 0) {
+        setError(true);
+        setMessage("A current market price is required before placing an order.");
+        return;
+      }
       const result = await trade(side, symbol, qty, price);
       setMessage(
         result ||
@@ -257,7 +264,7 @@ export function Simulation() {
             />
           </label>
           <div className="market-top-actions">
-            <span className="market-live-dot" /> <span>Virtual market</span>
+            <span className="market-live-dot" /> <span>{quotesLoading ? "Refreshing prices…" : "Backend market data"}</span>
             <Link to="/portfolio" className="market-avatar">
               P
             </Link>
@@ -288,14 +295,13 @@ export function Simulation() {
           {indianIndices.map(([name, value, move]) => (
             <div className="market-ticker-item" key={name}>
               <b>{name}</b>
-              <span>{value}</span>
-              <strong className={move >= 0 ? "up" : "dn"}>
-                {move >= 0 ? "+" : ""}
-                {move.toFixed(2)}%
-              </strong>
+              <span>{displayPrice(value)}</span>
+              {move != null && <strong className={move >= 0 ? "up" : "dn"}>{move >= 0 ? "+" : ""}{Number(move).toFixed(2)}%</strong>}
             </div>
           ))}
         </div>
+        {quotesError && <div className="market-api-error" role="alert">Market data unavailable: {quotesError}</div>}
+        {updatedAt && <p className="market-muted" style={{ marginTop: 10 }}>Prices last refreshed {updatedAt.toLocaleTimeString()}. Provider data may be delayed.</p>}
 
         {activeTab === "Explore" && (
           <div className="market-layout">
@@ -303,7 +309,7 @@ export function Simulation() {
               <div className="market-section-heading">
                 <div>
                   <span className="market-eyebrow">
-                    <i /> LIVE · SIMULATED PRICES
+                    <i /> BACKEND MARKET DATA
                   </span>
                   <h1>Popular Indian Stocks &amp; ETFs</h1>
                 </div>
@@ -337,11 +343,10 @@ export function Simulation() {
                             </small>
                           </span>
                           <span className="market-list-price">
-                            {inr(stock.p)}
+                            {displayPrice(stock.p)}
                           </span>
                           <span className={stock.c >= 0 ? "up" : "dn"}>
-                            {stock.c >= 0 ? "+" : ""}
-                            {stock.c.toFixed(2)}%
+                            {stock.c == null ? "—" : `${stock.c >= 0 ? "+" : ""}${Number(stock.c).toFixed(2)}%`}
                           </span>
                         </button>
                       ))
@@ -363,7 +368,7 @@ export function Simulation() {
                         </div>
                         <div className="market-stock-name">{stock.n}</div>
                         <div className="market-stock-ticker">{stock.s}</div>
-                        <div className="market-stock-price">{inr(stock.p)}</div>
+                        <div className="market-stock-price">{displayPrice(stock.p)}</div>
                         <div
                           className={
                             stock.c >= 0
@@ -371,8 +376,7 @@ export function Simulation() {
                               : "market-stock-change dn"
                           }
                         >
-                          {stock.c >= 0 ? "+" : ""}
-                          {stock.c.toFixed(2)}%
+                          {stock.c == null ? "—" : `${stock.c >= 0 ? "+" : ""}${Number(stock.c).toFixed(2)}%`}
                         </div>
                         <div className="market-card-actions">
                           <button onClick={() => toggleWatch(stock.s)}>
@@ -436,11 +440,10 @@ export function Simulation() {
                           </small>
                         </span>
                         <span className="market-list-price">
-                          {inr(stock.p)}
+                          {displayPrice(stock.p)}
                         </span>
                         <span className={stock.c >= 0 ? "up" : "dn"}>
-                          {stock.c >= 0 ? "+" : ""}
-                          {stock.c.toFixed(2)}%
+                          {stock.c == null ? "—" : `${stock.c >= 0 ? "+" : ""}${Number(stock.c).toFixed(2)}%`}
                         </span>
                       </button>
                     ))}
@@ -509,8 +512,7 @@ export function Simulation() {
                 ))}
               </div>
               <div className="market-disclaimer">
-                Practice with virtual money. Market prices and returns on this
-                page are simulated for learning.
+                Prices are supplied by the backend provider and may be delayed. Virtual money only.
               </div>
             </aside>
           </div>
@@ -531,7 +533,7 @@ export function Simulation() {
               <div className="market-list-card">
                 {watchlist.length ? (
                   watchlist.map((ticker) => {
-                    const stock = indianStocks.find(
+                    const stock = liveStocks.find(
                       (item) => item.s === ticker,
                     );
                     return stock ? (
@@ -544,7 +546,7 @@ export function Simulation() {
                           <small>{ticker}</small>
                         </span>
                         <span className="market-list-price">
-                          {inr(stock.p)}
+                          {displayPrice(stock.p)}
                         </span>
                         <button onClick={() => toggleWatch(ticker)}>
                           Remove
@@ -564,11 +566,11 @@ export function Simulation() {
             ) : activeTab === "Orders" ? (
               <div className="market-list-card">
                 {st.log.filter((order) =>
-                  indianStocks.some((stock) => stock.s === order.sym),
+                  liveStocks.some((stock) => stock.s === order.sym),
                 ).length ? (
                   st.log
                     .filter((order) =>
-                      indianStocks.some((stock) => stock.s === order.sym),
+                      liveStocks.some((stock) => stock.s === order.sym),
                     )
                     .map((order, i) => (
                       <div className="market-list-row" key={`${order.t}-${i}`}>
@@ -596,11 +598,11 @@ export function Simulation() {
             ) : (
               <div className="market-list-card">
                 {P.rows.filter((row) =>
-                  indianStocks.some((stock) => stock.s === row.s),
+                  liveStocks.some((stock) => stock.s === row.s),
                 ).length ? (
                   P.rows
                     .filter((row) =>
-                      indianStocks.some((stock) => stock.s === row.s),
+                      liveStocks.some((stock) => stock.s === row.s),
                     )
                     .map((row) => (
                       <div className="market-list-row" key={row.s}>
@@ -613,10 +615,8 @@ export function Simulation() {
                             {row.q} shares · Avg. {inr(row.avg)}
                           </small>
                         </span>
-                        <span className="market-list-price">{inr(row.v)}</span>
-                        <b className={row.pl >= 0 ? "up" : "dn"}>
-                          {sgn(row.pl)}
-                        </b>
+                        <span className="market-list-price">{row.v == null ? "Unavailable" : inr(row.v)}</span>
+                        {row.pl == null ? <b className="mu">—</b> : <b className={row.pl >= 0 ? "up" : "dn"}>{sgn(row.pl)}</b>}
                         <button onClick={() => chooseStock(row.s)}>
                           Trade
                         </button>
@@ -652,9 +652,14 @@ export function Simulation() {
             <span className="market-eyebrow">VIRTUAL ORDER</span>
             <h2>{symbol}</h2>
             <p className="market-muted">
-              {inr(price)} per share · {change >= 0 ? "+" : ""}
-              {change.toFixed(2)}%
+              {displayPrice(price)} per share · {change == null ? "Change unavailable" : `${change >= 0 ? "+" : ""}${Number(change).toFixed(2)}%`}
             </p>
+            <div className="market-chart-ranges">
+              {[['1D', null], ['1W', null], ['1M', '1mo'], ['3M', '3mo'], ['6M', '6mo'], ['1Y', '1y'], ['5Y', '5y']].map(([label, value]) => (
+                <button key={label} disabled={!value} className={chartPeriod === value ? "active" : ""} onClick={() => value && setChartPeriod(value)} title={!value ? "This backend currently provides daily history from 1 month onward." : undefined}>{label}</button>
+              ))}
+            </div>
+            <StockChart symbol={symbol} price={price} history={history} loading={historyLoading} error={historyError} h={210} />
             <div className="market-order-tabs">
               <button
                 className={side === "BUY" ? "selected buy" : ""}
@@ -688,7 +693,7 @@ export function Simulation() {
             </label>
             <div className="market-order-total">
               <span>Estimated value</span>
-              <b>{inr(price * qty)}</b>
+              <b>{Number.isFinite(price) ? inr(price * qty) : "Unavailable"}</b>
             </div>
             <div className="market-order-total">
               <span>Available virtual cash</span>
@@ -706,7 +711,7 @@ export function Simulation() {
             <button
               className={`market-submit-order ${side === "BUY" ? "buy" : "sell"}`}
               onClick={submitOrder}
-              disabled={busy}
+              disabled={busy || !Number.isFinite(price)}
             >
               {busy ? "Placing…" : `Confirm ${side}`}
             </button>
@@ -798,9 +803,9 @@ export function Portfolio() {
           </Link>,
           r.q,
           inr(r.avg),
-          inr(r.p),
-          inr(r.v),
-          <Pl v={r.pl} />,
+          r.p == null ? "Unavailable" : inr(r.p),
+          r.v == null ? "Unavailable" : inr(r.v),
+          r.pl == null ? "—" : <Pl v={r.pl} />,
         ])}
       />
       <h3 style={{ margin: "22px 0 8px" }}>Transaction history</h3>
@@ -1363,21 +1368,37 @@ export function About() {
   );
 }
 
-const Auth = ({ t, sw, children, to, btn }) => {
+const Auth = ({ t, sw, children, to, btn, onSubmit }) => {
   const nav = useNavigate();
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
   return (
     <main className="wrap">
       <div className="card auth">
         <h1 style={{ fontSize: 26 }}>{t}</h1>
         <form
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
-            nav("/invest");
+            setBusy(true);
+            setError("");
+            setMessage("");
+            try {
+              const result = await onSubmit(new FormData(e.currentTarget));
+              if (result?.message) setMessage(result.message);
+              else nav("/profile", { replace: true });
+            } catch (err) {
+              setError(err.message || "Authentication failed. Please try again.");
+            } finally {
+              setBusy(false);
+            }
           }}
         >
           {children}
-          <button className="btn p" style={{ justifyContent: "center" }}>
-            {btn}
+          {error && <p className="dn tiny">{error}</p>}
+          {message && <p className="up tiny">{message}</p>}
+          <button className="btn p" style={{ justifyContent: "center" }} disabled={busy}>
+            {busy ? "Please wait…" : btn}
           </button>
         </form>
         <p className="mu" style={{ marginTop: 16 }}>
@@ -1396,18 +1417,16 @@ export const Login = () => (
     sw={["New here?", "Sign Up"]}
     to="/signup"
     btn="Login"
+    onSubmit={(form) => loginUser({ email: form.get("email"), password: form.get("password") })}
   >
-    <input type="email" placeholder="Email" required />
-    <input type="password" placeholder="Password" required />
+    <input name="email" type="email" placeholder="Email" autoComplete="email" required />
+    <input name="password" type="password" placeholder="Password" autoComplete="current-password" required />
     <label className="tiny">
       <input type="checkbox" style={{ width: "auto" }} /> Remember me
     </label>
     <span className="tiny" style={{ color: "#2563eb" }}>
       Forgot password?
     </span>
-    <button type="button" className="btn">
-      Continue with Google
-    </button>
   </Auth>
 );
 export const Signup = () => (
@@ -1416,12 +1435,18 @@ export const Signup = () => (
     sw={["Already have an account?", "Login"]}
     to="/login"
     btn="Create Account"
+    onSubmit={async (form) => {
+      const password = form.get("password");
+      if (password !== form.get("confirmPassword")) throw new Error("Passwords do not match.");
+      const user = await registerUser({ name: form.get("name"), email: form.get("email"), password, ageGroup: form.get("ageGroup") });
+      return user.hasSession ? null : { message: "Check your email to confirm your account, then log in." };
+    }}
   >
-    <input placeholder="Name" required />
-    <input type="email" placeholder="Email" required />
-    <input type="password" placeholder="Password" required />
-    <input type="password" placeholder="Confirm Password" required />
-    <select>
+    <input name="name" placeholder="Name" autoComplete="name" required />
+    <input name="email" type="email" placeholder="Email" autoComplete="email" required />
+    <input name="password" type="password" placeholder="Password" autoComplete="new-password" minLength="6" required />
+    <input name="confirmPassword" type="password" placeholder="Confirm Password" autoComplete="new-password" minLength="6" required />
+    <select name="ageGroup">
       <option>Teens</option>
       <option>20s</option>
       <option>30s</option>
