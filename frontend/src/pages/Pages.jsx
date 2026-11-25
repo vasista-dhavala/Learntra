@@ -142,8 +142,8 @@ export function Simulation() {
     p = livePrice(base, sym, tick),
     tot = p * qty,
     h = st.hold[s];
-  const go = () => {
-    const e = trade(side, s, qty, p);
+  const go = async () => {
+    const e = await trade(side, s, qty, p);
     setErr(e);
     if (!e) {
       setOk(false);
@@ -151,415 +151,114 @@ export function Simulation() {
     }
   };
   return (
-    <main className="market-page">
-      <div className="market-shell">
-        <div className="market-topbar">
-          <div className="market-brand">
-            <span className="market-brand-mark">L</span>
-            <b>Markets</b>
-            <span>Stocks</span>
-            <span>ETFs</span>
-            <span>Bonds</span>
-          </div>
-          <label className="market-search">
-            <span>⌕</span>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search Indian stocks and companies"
-            />
-          </label>
-          <div className="market-top-actions">
-            <span className="market-live-dot" />
-            <span>Backend market data</span>
-            <Link to="/portfolio" className="market-avatar">
-              P
-            </Link>
-          </div>
+    <main className="wrap page">
+      <Head
+        t="Investment Simulation"
+        s="Virtual trading only. Prices move slightly every few seconds."
+      />
+      <div className="g3">
+        <Stat l="Virtual balance" v={inr(st.cash)} />
+        <Stat l={`You hold (${s})`} v={h ? h.q + " shares" : "0 shares"} />
+      </div>
+      <div className="g2">
+        <div className="card">
+          <b>{s}</b> <span className="mu">{inr(p)}</span>{" "}
+          <Chg c={assets[sym][2]} />
+          <StockChart seed={sym + 3} />
         </div>
-        <div className="market-subnav">
-          {[
-            ["Explore", "Explore"],
-            ["Holdings", "Holdings"],
-            ["Orders", "Orders"],
-            ["Watchlist", "Watchlist"],
-          ].map(([label, value]) => (
+        <div className="card" style={{ display: "grid", gap: 12 }}>
+          <div className="tab">
             <button
-              key={value}
-              className={activeTab === value ? "active" : ""}
-              onClick={() => setActiveTab(value)}
+              className={side === "BUY" ? "on" : ""}
+              onClick={() => setSide("BUY")}
             >
-              {label}
+              Buy
             </button>
-          ))}
-          <Link to="/portfolio" className="market-terminal-link">
-            Portfolio ↗
+            <button
+              className={side === "SELL" ? "on" : ""}
+              onClick={() => setSide("SELL")}
+            >
+              Sell
+            </button>
+          </div>
+          <select
+            value={sym}
+            onChange={(e) => {
+              setSym(+e.target.value);
+              setOk(false);
+              setErr("");
+            }}
+          >
+            {assets.map((a, i) => (
+              <option key={a[0]} value={i}>
+                {a[0]}
+              </option>
+            ))}
+          </select>
+          <input
+            type="number"
+            min="1"
+            value={qty}
+            onChange={(e) =>
+              setQty(Math.max(1, Math.floor(+e.target.value) || 1))
+            }
+          />
+          <div className="row">
+            <span>Estimated order value</span>
+            <b>{inr(tot)}</b>
+          </div>
+          {err && <div className="dn tiny">{err}</div>}
+          {ok ? (
+            <div className="cta">
+              <button className="btn g sm" onClick={go}>
+                Confirm {side}
+              </button>
+              <button className="btn sm" onClick={() => setOk(false)}>
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button className="btn p" onClick={() => setOk(true)}>
+              Review order
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="g2">
+        <div className="card">
+          <b>Holdings</b>
+          {P.rows.length ? (
+            P.rows.map((r) => (
+              <div className="row" key={r.s}>
+                <span>{r.s}</span>
+                <span>{r.q} shares</span>
+                <span className={r.pl >= 0 ? "up" : "dn"}>{sgn(r.pl)}</span>
+              </div>
+            ))
+          ) : (
+            <p className="tiny">No holdings yet. Place a buy order.</p>
+          )}
+          <Link to="/portfolio" className="btn sm" style={{ marginTop: 10 }}>
+            Open portfolio
           </Link>
         </div>
-        <div className="market-ticker">
-          {indicesLive.map(([name, value, move]) => (
-            <div className="market-ticker-item" key={name}>
-              <b>{name}</b>
-              <span>{value}</span>
-              <strong className={move >= 0 ? "up" : "dn"}>
-                {move >= 0 ? "+" : ""}
-                {Number(move).toFixed(2)}%
-              </strong>
-            </div>
-          ))}
+        <div className="card">
+          <b>Transaction history</b>
+          {st.log.length ? (
+            st.log.slice(0, 6).map((t, i) => (
+              <div className="row" key={i}>
+                <span className={t.side === "BUY" ? "up" : "dn"}>
+                  {t.side} {t.sym} ×{t.qty}
+                </span>
+                <span>{inr(t.price)}</span>
+              </div>
+            ))
+          ) : (
+            <p className="tiny">No transactions yet.</p>
+          )}
         </div>
-        {apiError && (
-          <div className="market-api-error" role="alert">
-            {apiError}
-          </div>
-        )}
-        {loading && <p className="market-muted">Loading Indian market data…</p>}
-        {activeTab === "Explore" && (
-          <div className="market-layout">
-            <section className="market-main-column">
-              <div className="market-section-heading">
-                <div>
-                  <span className="market-eyebrow">
-                    <i /> BACKEND MARKET DATA
-                  </span>
-                  <h1>
-                    {query.trim().length >= 2
-                      ? "Search results"
-                      : "Popular Indian Stocks"}
-                  </h1>
-                </div>
-                <span className="market-muted">
-                  {filteredStocks.length} stocks
-                </span>
-              </div>
-              <div className="market-stock-grid">
-                {(query.trim().length >= 2
-                  ? filteredStocks.slice(0, 4)
-                  : popularIndian
-                ).map((stock) => (
-                  <article className="market-stock-card" key={stock.s}>
-                    <div className="market-stock-logo">
-                      {stock.s.slice(0, 2)}
-                    </div>
-                    <div className="market-stock-name">{stock.n}</div>
-                    <div className="market-stock-ticker">{stock.s} · NSE</div>
-                    <div className="market-stock-price">{inr(stock.p)}</div>
-                    <div
-                      className={
-                        stock.c >= 0
-                          ? "market-stock-change up"
-                          : "market-stock-change dn"
-                      }
-                    >
-                      {stock.c >= 0 ? "+" : ""}
-                      {Number(stock.c || 0).toFixed(2)}%
-                    </div>
-                    <div className="market-card-actions">
-                      <button onClick={() => toggleWatch(stock.s)}>
-                        {watchlist.includes(stock.s) ? "★ Saved" : "☆ Watch"}
-                      </button>
-                      <button onClick={() => chooseStock(stock.s)}>
-                        Trade
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-              <div className="market-section-heading market-bond-heading">
-                <h2>♧ Popular Bonds</h2>
-              </div>
-              <div className="market-bond-grid">
-                {bonds.map((b) => (
-                  <article className="market-bond-card" key={b.name}>
-                    <div className="market-bond-logo">▤</div>
-                    <b>
-                      {b.name} {b.term}
-                    </b>
-                    <strong>{b.rate}</strong>
-                    <div className="market-bond-meta">
-                      <span>{b.months}</span>
-                      <span>
-                        {b.rating} <i />
-                      </span>
-                    </div>
-                  </article>
-                ))}
-              </div>
-              <div className="market-section-heading">
-                <h2>Explore Indian stocks</h2>
-                <span className="market-muted">
-                  {filteredStocks.length} assets
-                </span>
-              </div>
-              <div className="market-list-card">
-                {filteredStocks.slice(0, 100).map((stock) => (
-                  <button
-                    className="market-list-row"
-                    key={stock.s}
-                    onClick={() => chooseStock(stock.s)}
-                  >
-                    <span className="market-list-symbol">
-                      {stock.s.slice(0, 2)}
-                    </span>
-                    <span className="market-list-name">
-                      <b>{stock.n}</b>
-                      <small>
-                        {stock.s} · {stock.sec}
-                      </small>
-                    </span>
-                    <span className="market-list-price">
-                      {stock.p ? inr(stock.p) : "—"}
-                    </span>
-                    <span className={stock.c >= 0 ? "up" : "dn"}>
-                      {stock.c == null
-                        ? "—"
-                        : `${stock.c >= 0 ? "+" : ""}${Number(stock.c).toFixed(2)}%`}
-                    </span>
-                  </button>
-                ))}
-              </div>
-              {query.trim().length >= 2 &&
-                !searchResults.length &&
-                !loading && (
-                  <p className="market-empty">
-                    No matching Indian stocks found.
-                  </p>
-                )}
-            </section>
-            <aside className="market-side-column">
-              <h2>Your investments</h2>
-              <div className="market-investment-card">
-                <span className="market-muted">Current account value</span>
-                <strong className="market-account-value">{inr(P.eq)}</strong>
-                <div className="market-investment-row">
-                  <span>Today's returns</span>
-                  <b className={P.unreal >= 0 ? "up" : "dn"}>{sgn(P.unreal)}</b>
-                </div>
-                <div className="market-investment-row">
-                  <span>Total returns</span>
-                  <b className={P.total >= 0 ? "up" : "dn"}>
-                    {sgn(P.total)} ({((P.total / P.start) * 100).toFixed(2)}%)
-                  </b>
-                </div>
-                <div className="market-investment-row">
-                  <span>Invested</span>
-                  <b>{inr(P.val)}</b>
-                </div>
-                <div className="market-investment-row">
-                  <span>Available cash</span>
-                  <b>{inr(st.cash)}</b>
-                </div>
-                <Link to="/portfolio" className="market-full-link">
-                  View portfolio ↗
-                </Link>
-              </div>
-              <h2 className="market-tools-title">Products &amp; Tools</h2>
-              <div className="market-tools-card">
-                {[
-                  ["📣", "IPOs", "/investing/ipos", "Indian listings"],
-                  ["▤", "Bonds", "/investing/bonds", "Indian fixed income"],
-                  ["▥", "ETFs", "/investing/stocks", "Indian funds"],
-                  [
-                    "⌁",
-                    "Trading",
-                    "/investing/trading",
-                    "Learn trading basics",
-                  ],
-                ].map(([icon, name, path, detail]) => (
-                  <Link to={path} className="market-tool-row" key={name}>
-                    <span>{icon}</span>
-                    <b>{name}</b>
-                    <small>{detail}</small>
-                    <span className="market-tool-arrow">›</span>
-                  </Link>
-                ))}
-              </div>
-              <div className="market-disclaimer">
-                Quotes come from your backend via yfinance and may be delayed.
-                Virtual money only.
-              </div>
-            </aside>
-          </div>
-        )}
-        {activeTab !== "Explore" && (
-          <section className="market-tab-content">
-            <div className="market-section-heading">
-              <div>
-                <span className="market-eyebrow">YOUR SIMULATION</span>
-                <h1>{activeTab}</h1>
-              </div>
-              <Link to="/portfolio" className="market-see-all">
-                Full portfolio ↗
-              </Link>
-            </div>
-            {activeTab === "Watchlist" ? (
-              <div className="market-list-card">
-                {watchlist.length ? (
-                  watchlist.map((ticker) => {
-                    const stock = marketStocks.find((x) => x.s === ticker);
-                    return stock ? (
-                      <div className="market-list-row" key={ticker}>
-                        <span className="market-list-symbol">
-                          {ticker.slice(0, 2)}
-                        </span>
-                        <span className="market-list-name">
-                          <b>{stock.n}</b>
-                          <small>{ticker}</small>
-                        </span>
-                        <span className="market-list-price">
-                          {inr(stock.p)}
-                        </span>
-                        <button onClick={() => toggleWatch(ticker)}>
-                          Remove
-                        </button>
-                        <button onClick={() => chooseStock(ticker)}>
-                          Trade
-                        </button>
-                      </div>
-                    ) : null;
-                  })
-                ) : (
-                  <p className="market-empty">Your watchlist is empty.</p>
-                )}
-              </div>
-            ) : activeTab === "Orders" ? (
-              <div className="market-list-card">
-                {st.log.length ? (
-                  st.log.map((o, i) => (
-                    <div className="market-list-row" key={`${o.t}-${i}`}>
-                      <span className="market-list-symbol">
-                        {o.side === "BUY" ? "↗" : "↘"}
-                      </span>
-                      <span className="market-list-name">
-                        <b>
-                          {o.side} · {o.sym}
-                        </b>
-                        <small>{new Date(o.t).toLocaleString("en-IN")}</small>
-                      </span>
-                      <span>{o.qty} shares</span>
-                      <b>{inr(o.qty * o.price)}</b>
-                    </div>
-                  ))
-                ) : (
-                  <p className="market-empty">No orders yet.</p>
-                )}
-              </div>
-            ) : (
-              <div className="market-list-card">
-                {P.rows.length ? (
-                  P.rows.map((row) => (
-                    <div className="market-list-row" key={row.s}>
-                      <span className="market-list-symbol">
-                        {row.s.slice(0, 2)}
-                      </span>
-                      <span className="market-list-name">
-                        <b>{row.s}</b>
-                        <small>
-                          {row.q} shares · Avg. {inr(row.avg)}
-                        </small>
-                      </span>
-                      <span className="market-list-price">{inr(row.v)}</span>
-                      <b className={row.pl >= 0 ? "up" : "dn"}>{sgn(row.pl)}</b>
-                      <button onClick={() => chooseStock(row.s)}>Trade</button>
-                    </div>
-                  ))
-                ) : (
-                  <p className="market-empty">
-                    No holdings yet. Explore Indian stocks.
-                  </p>
-                )}
-              </div>
-            )}
-          </section>
-        )}
       </div>
-      {orderOpen && (
-        <div
-          className="market-order-backdrop"
-          onClick={() => setOrderOpen(false)}
-        >
-          <section
-            className="market-order-panel"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              className="market-order-close"
-              onClick={() => setOrderOpen(false)}
-            >
-              ×
-            </button>
-            <span className="market-eyebrow">VIRTUAL ORDER</span>
-            <h2>{symbol}</h2>
-            <p className="market-muted">
-              {inr(price)} per share · {change >= 0 ? "+" : ""}
-              {Number(change || 0).toFixed(2)}%
-            </p>
-            {history.length > 0 && (
-              <p className="market-muted">
-                Latest history: {history[history.length - 1].date} · Close{" "}
-                {inr(history[history.length - 1].close)}
-              </p>
-            )}
-            <div className="market-order-tabs">
-              <button
-                className={side === "BUY" ? "selected buy" : ""}
-                onClick={() => {
-                  setSide("BUY");
-                  setMessage("");
-                }}
-              >
-                Buy
-              </button>
-              <button
-                className={side === "SELL" ? "selected sell" : ""}
-                onClick={() => {
-                  setSide("SELL");
-                  setMessage("");
-                }}
-              >
-                Sell
-              </button>
-            </div>
-            <label className="market-qty-label">
-              Quantity
-              <input
-                type="number"
-                min="1"
-                value={qty}
-                onChange={(e) =>
-                  setQty(Math.max(1, Math.floor(Number(e.target.value)) || 1))
-                }
-              />
-            </label>
-            <div className="market-order-total">
-              <span>Estimated value</span>
-              <b>{inr(price * qty)}</b>
-            </div>
-            <div className="market-order-total">
-              <span>Available virtual cash</span>
-              <b>{inr(st.cash)}</b>
-            </div>
-            {message && (
-              <p
-                className={
-                  error ? "market-order-message error" : "market-order-message"
-                }
-              >
-                {message}
-              </p>
-            )}
-            <button
-              className={`market-submit-order ${side === "BUY" ? "buy" : "sell"}`}
-              onClick={submitOrder}
-            >
-              Confirm {side}
-            </button>
-            <p className="market-order-note">
-              Simulated order only. No real money is used.
-            </p>
-          </section>
-        </div>
-      )}
+      <Demo />
     </main>
   );
 }
@@ -1287,3 +986,128 @@ export const NotFound = () => (
     </Link>
   </main>
 );
+
+export function Profile() {
+  const user = useAuth();
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleLogout = async () => {
+    setBusy(true);
+    setError("");
+
+    try {
+      await logoutUser();
+      navigate("/", { replace: true });
+    } catch (err) {
+      setError(err.message || "Unable to log out.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!user) {
+    return (
+      <main className="wrap page">
+        <Head t="Your Profile" s="Log in to view your Learntra account." />
+        <div className="card">
+          <Link to="/login" className="btn p">
+            Login
+          </Link>
+          <Link to="/signup" className="btn">
+            Create Account
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="wrap page">
+      <Head
+        t={`Welcome, ${user.name || "Learner"}!`}
+        s="Your personal Learntra account dashboard."
+      />
+
+      {/* PROFILE DETAILS */}
+      <div className="card" style={{ maxWidth: 700 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: "50%",
+              background: "#2563eb",
+              color: "white",
+              display: "grid",
+              placeItems: "center",
+              fontSize: 28,
+              fontWeight: 700,
+            }}
+          >
+            {(user.name || "L").charAt(0).toUpperCase()}
+          </div>
+
+          <div>
+            <h2 style={{ margin: 0 }}>{user.name || "Learntra Learner"}</h2>
+            <p className="mu" style={{ margin: "5px 0" }}>
+              {user.email}
+            </p>
+          </div>
+        </div>
+
+        <hr style={{ margin: "20px 0", opacity: 0.2 }} />
+
+        <div className="row">
+          <span>Full Name</span>
+          <b>{user.name || "Not provided"}</b>
+        </div>
+
+        <div className="row">
+          <span>Email Address</span>
+          <b>{user.email}</b>
+        </div>
+
+        <div className="row">
+          <span>Age Group</span>
+          <b>{user.ageGroup || "Not provided"}</b>
+        </div>
+
+        <div className="row">
+          <span>Account ID</span>
+          <span className="tiny">{user.id}</span>
+        </div>
+      </div>
+
+      {/* QUICK LINKS */}
+      <h3 style={{ marginTop: 24 }}>Quick Access</h3>
+
+      <div className="g3">
+        <Link to="/invest" className="card">
+          <h3>Investment Dashboard</h3>
+          <p className="mu">Explore markets and investment simulations.</p>
+        </Link>
+
+        <Link to="/portfolio" className="card">
+          <h3>My Portfolio</h3>
+          <p className="mu">View virtual holdings and performance.</p>
+        </Link>
+
+        <Link to="/personal-finance/financial-plan" className="card">
+          <h3>Financial Planning</h3>
+          <p className="mu">Create your financial plan.</p>
+        </Link>
+      </div>
+
+      {/* LOGOUT */}
+      <div className="card" style={{ marginTop: 24 }}>
+        {error && <p className="dn">{error}</p>}
+
+        <button className="btn p" onClick={handleLogout} disabled={busy}>
+          {busy ? "Logging out..." : "Log Out"}
+        </button>
+      </div>
+    </main>
+  );
+}
