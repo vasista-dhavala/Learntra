@@ -1,4 +1,3 @@
-
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { logoutUser, useAuth } from "../data/auth.js";
@@ -9,7 +8,7 @@ const groups = [
   {
     label: "NEWS",
     items: [
-      ["Markets", "/news/markets"],
+      ["Stock Market", "/news/markets"],
       ["Companies", "/news/companies"],
       ["Economy", "/news/economy"],
       ["Government", "/news/government"],
@@ -29,9 +28,8 @@ const groups = [
   {
     label: "SIMULATION",
     items: [
-      ["Login", "/login"],
-      ["Portfolio", "/portfolio"],
-      ["Trade", "/invest/simulation"],
+      ["My Portfolio", "/portfolio"],
+      ["Market", "/invest/simulation"],
     ],
   },
   {
@@ -57,6 +55,7 @@ export default function Navbar() {
 
   useEffect(() => {
     document.body.classList.toggle("dark-theme", darkMode);
+
     localStorage.setItem("learntra-theme", darkMode ? "dark" : "light");
   }, [darkMode]);
 
@@ -86,11 +85,7 @@ export default function Navbar() {
     <header className="nav">
       <div className="wrap nav-inner">
         {/* LOGO */}
-        <Link
-          to="/"
-          className="brand"
-          onClick={() => setMobileOpen(false)}
-        >
+        <Link to="/" className="brand" onClick={() => setMobileOpen(false)}>
           <Rocket color="#2563eb" size={28} />
           <span>Learntra</span>
         </Link>
@@ -140,36 +135,33 @@ export default function Navbar() {
             );
           })}
 
-            {/* MOBILE ACCOUNT */}
-            <div className="mobile-auth">
-              {user ? (
-                <>
-                  <Link
-                    to="/profile"
-                    className="btn p"
-                    onClick={() => setMobileOpen(false)}
-                  >
-                    My Profile
-                  </Link>
-
-                  <button
-                    className="btn p"
-                    onClick={handleLogout}
-                  >
-                    Log out
-                  </button>
-                </>
-              ) : (
+          {/* MOBILE ACCOUNT */}
+          <div className="mobile-auth">
+            {user ? (
+              <>
                 <Link
-                  to="/login"
+                  to="/profile"
                   className="btn p"
                   onClick={() => setMobileOpen(false)}
                 >
-                  Login / Sign Up
+                  My Profile
                 </Link>
-              )}
-            </div>
-          </nav>
+
+                <button className="btn p" onClick={handleLogout}>
+                  Log out
+                </button>
+              </>
+            ) : (
+              <Link
+                to="/login"
+                className="btn p"
+                onClick={() => setMobileOpen(false)}
+              >
+                Login / Sign Up
+              </Link>
+            )}
+          </div>
+        </nav>
 
         {/* RIGHT SIDE */}
         <div className="right">
@@ -187,15 +179,18 @@ export default function Navbar() {
 
           {/* ACCOUNT */}
           {user ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 9,
+              }}
+            >
               <Link to="/profile" className="btn p sm">
                 My Profile
               </Link>
 
-              <button
-                className="btn p sm"
-                onClick={handleLogout}
-              >
+              <button className="btn p sm" onClick={handleLogout}>
                 Log out
               </button>
             </div>
