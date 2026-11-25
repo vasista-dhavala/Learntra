@@ -4,8 +4,7 @@ import {
   useNavigate,
   useSearchParams,
 } from "react-router-dom";
-import { useEffect, useState } from "react";
-import { loginUser, registerUser, useAuth, logoutUser } from "../data/auth.js";
+import { useState, useEffect } from "react";
 import StockChart, { Spark } from "../components/StockChart.jsx";
 import {
   movers,
@@ -24,15 +23,6 @@ import {
 } from "../data/store.js";
 import { inr, sgn, Chg, Demo, Head, Stat } from "../utils/helpers.jsx";
 import "./Pages.css";
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
-const formatStockPrice = (price, currency = "INR") =>
-  new Intl.NumberFormat("en", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 2,
-  }).format(price);
-
 const Table = ({ rows }) => (
   <div className="card">
     {rows.map((r) => (
@@ -135,140 +125,640 @@ export function Invest() {
 }
 
 export function Simulation() {
-  const [sp] = useSearchParams(),
-    P = usePortfolio(),
-    { st, tick } = P;
-  const [side, setSide] = useState("BUY"),
-    [sym, setSym] = useState(
-      Math.max(
-        0,
-        assets.findIndex((a) => a[0] === sp.get("asset")),
-      ),
-    ),
-    [qty, setQty] = useState(1),
-    [ok, setOk] = useState(false),
-    [err, setErr] = useState("");
-  const [s, base] = assets[sym],
-    p = livePrice(base, sym, tick),
-    tot = p * qty,
-    h = st.hold[s];
-  const go = () => {
-    const e = trade(side, s, qty, p);
-    setErr(e);
-    if (!e) {
-      setOk(false);
-      setQty(1);
+  const [sp] = useSearchParams();
+  const P = usePortfolio();
+  const { st } = P;
+  const API = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+  const [activeTab, setActiveTab] = useState("Explore");
+  const [query, setQuery] = useState("");
+  const [watchlist, setWatchlist] = useState([
+    "TCS",
+    "RELIANCE",
+    "HDFCBANK",
+    "INFY",
+  ]);
+  const [marketStocks, setMarketStocks] = useState(
+    stocks.filter((x) => x.r === "India"),
+  );
+  const [quotes, setQuotes] = useState({});
+  const [indicesLive, setIndicesLive] = useState(
+    indices.filter((x) => ["NIFTY 50", "SENSEX"].includes(x[0])),
+  );
+  const [searchResults, setSearchResults] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [apiError, setApiError] = useState("");
+  const [selectedSymbol, setSelectedSymbol] = useState(
+    sp.get("asset") || "TCS",
+  );
+  const [history, setHistory] = useState([]);
+  const [side, setSide] = useState("BUY");
+  const [qty, setQty] = useState(1);
+  const [orderOpen, setOrderOpen] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState(false);
+  const normalize = (s) =>
+    String(s || "")
+      .toUpperCase()
+      .replace(/\.NS$/, "");
+
+  const fetchQuotes = async (symbols) => {
+    if (!symbols.length) return {};
+    const response = await fetch(
+      `${API}/stocks/market-data?symbols=${encodeURIComponent(symbols.join(","))}`,
+    );
+    if (!response.ok)
+      throw new Error(`Market data request failed (${response.status})`);
+    const body = await response.json();
+    return Object.fromEntries(
+      (body.results || [])
+        .filter((x) => !x.error)
+        .map((x) => [normalize(x.symbol), x]),
+    );
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      setApiError("");
+      try {
+        const symbols = [
+          ...new Set(stocks.filter((x) => x.r === "India").map((x) => x.s)),
+        ];
+        const map = await fetchQuotes([...symbols, "^NSEI", "^BSESN"]);
+        if (cancelled) return;
+        setQuotes(map);
+        setMarketStocks(
+          stocks
+            .filter((x) => x.r === "India")
+            .map((x) => {
+              const q = map[normalize(x.s)];
+              return {
+                ...x,
+                p: q?.price ?? x.p,
+                c: q?.change_percent ?? x.c,
+                asOf: q?.as_of,
+                priceType: q?.price_type,
+              };
+            }),
+        );
+        const indexRows = [
+          ["NIFTY 50", map["^NSEI"]],
+          ["SENSEX", map["^BSESN"]],
+        ].filter(([, q]) => q);
+        if (indexRows.length)
+          setIndicesLive(
+            indexRows.map(([name, q]) => [
+              name,
+              Number(q.price).toLocaleString("en-IN", {
+                maximumFractionDigits: 2,
+              }),
+              q.change_percent ?? 0,
+            ]),
+          );
+      } catch (e) {
+        if (!cancelled)
+          setApiError(
+            `${e.message}. Confirm the FastAPI server is running at ${API}.`,
+          );
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    const interval = setInterval(load, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [API]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (query.trim().length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch(
+          `${API}/stocks/search?q=${encodeURIComponent(query.trim())}`,
+        );
+        if (!response.ok) throw new Error("Search failed");
+        const body = await response.json();
+        const matches = (body.results || []).filter(
+          (x) =>
+            /\.NS$|\.BO$/.test(x.symbol) || ["NSE", "BSE"].includes(x.exchange),
+        );
+        const map = await fetchQuotes(matches.map((x) => x.symbol));
+        if (cancelled) return;
+        setSearchResults(
+          matches.map((x) => {
+            const s = normalize(x.symbol),
+              q = map[s],
+              existing = marketStocks.find((v) => v.s === s);
+            return {
+              s,
+              n: x.name,
+              sec: existing?.sec || "Indian equities",
+              p: q?.price ?? existing?.p ?? 0,
+              c: q?.change_percent ?? existing?.c ?? 0,
+              r: "India",
+            };
+          }),
+        );
+      } catch {
+        if (!cancelled) setSearchResults([]);
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, API, marketStocks]);
+
+  const current =
+    marketStocks.find((x) => x.s === selectedSymbol) ||
+    marketStocks[0] ||
+    stocks[0];
+  const symbol = current.s;
+  const price = quotes[normalize(symbol)]?.price ?? current.p;
+  const change = quotes[normalize(symbol)]?.change_percent ?? current.c;
+  const filteredStocks =
+    query.trim().length >= 2 ? searchResults : marketStocks;
+  const popularIndian = ["RELIANCE", "TCS", "HDFCBANK", "INFY"]
+    .map((s) => marketStocks.find((x) => x.s === s))
+    .filter(Boolean);
+  const bonds = [
+    {
+      name: "Navi Finserv Ltd.",
+      term: "May '28",
+      rate: "10.10%",
+      months: "18 months",
+      rating: "A+",
+    },
+    {
+      name: "Muthoot Fincorp Ltd.",
+      term: "Sep '29",
+      rate: "9.10%",
+      months: "34 months",
+      rating: "AA",
+    },
+    {
+      name: "Piramal Finance Ltd.",
+      term: "Sep '31",
+      rate: "9.15%",
+      months: "58 months",
+      rating: "AA+",
+    },
+    {
+      name: "Lucina Land Development Ltd.",
+      term: "Jan '29",
+      rate: "13.30%",
+      months: "26 months",
+      rating: "A-",
+    },
+  ];
+  const chooseStock = async (ticker) => {
+    const s = normalize(ticker);
+    setSelectedSymbol(s);
+    setOrderOpen(true);
+    setMessage("");
+    try {
+      const r = await fetch(
+        `${API}/stocks/${encodeURIComponent(s)}/history?period=1mo`,
+      );
+      if (r.ok) setHistory((await r.json()).history || []);
+    } catch {
+      setHistory([]);
     }
   };
+  const submitOrder = () => {
+    const result = trade(side, symbol, qty, price);
+    setMessage(
+      result ||
+        `${side === "BUY" ? "Bought" : "Sold"} ${qty} ${symbol} successfully.`,
+    );
+    setError(Boolean(result));
+    if (!result) setQty(1);
+  };
+  const toggleWatch = (ticker) =>
+    setWatchlist((list) =>
+      list.includes(ticker)
+        ? list.filter((x) => x !== ticker)
+        : [...list, ticker],
+    );
+
   return (
-    <main className="wrap page">
-      <Head
-        t="Investment Simulation"
-        s="Virtual trading only. Prices move slightly every few seconds."
-      />
-      <div className="g3">
-        <Stat l="Virtual balance" v={inr(st.cash)} />
-        <Stat l={`You hold (${s})`} v={h ? h.q + " shares" : "0 shares"} />
-      </div>
-      <div className="g2">
-        <div className="card">
-          <b>{s}</b> <span className="mu">{inr(p)}</span>{" "}
-          <Chg c={assets[sym][2]} />
-          <StockChart seed={sym + 3} />
-        </div>
-        <div className="card" style={{ display: "grid", gap: 12 }}>
-          <div className="tab">
-            <button
-              className={side === "BUY" ? "on" : ""}
-              onClick={() => setSide("BUY")}
-            >
-              Buy
-            </button>
-            <button
-              className={side === "SELL" ? "on" : ""}
-              onClick={() => setSide("SELL")}
-            >
-              Sell
-            </button>
+    <main className="market-page">
+      <div className="market-shell">
+        <div className="market-topbar">
+          <div className="market-brand">
+            <span className="market-brand-mark">L</span>
+            <b>Markets</b>
+            <span>Stocks</span>
+            <span>ETFs</span>
+            <span>Bonds</span>
           </div>
-          <select
-            value={sym}
-            onChange={(e) => {
-              setSym(+e.target.value);
-              setOk(false);
-              setErr("");
-            }}
-          >
-            {assets.map((a, i) => (
-              <option key={a[0]} value={i}>
-                {a[0]}
-              </option>
-            ))}
-          </select>
-          <input
-            type="number"
-            min="1"
-            value={qty}
-            onChange={(e) =>
-              setQty(Math.max(1, Math.floor(+e.target.value) || 1))
-            }
-          />
-          <div className="row">
-            <span>Estimated order value</span>
-            <b>{inr(tot)}</b>
+          <label className="market-search">
+            <span>⌕</span>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search Indian stocks and companies"
+            />
+          </label>
+          <div className="market-top-actions">
+            <span className="market-live-dot" />
+            <span>Backend market data</span>
+            <Link to="/portfolio" className="market-avatar">
+              P
+            </Link>
           </div>
-          {err && <div className="dn tiny">{err}</div>}
-          {ok ? (
-            <div className="cta">
-              <button className="btn g sm" onClick={go}>
-                Confirm {side}
-              </button>
-              <button className="btn sm" onClick={() => setOk(false)}>
-                Cancel
-              </button>
-            </div>
-          ) : (
-            <button className="btn p" onClick={() => setOk(true)}>
-              Review order
-            </button>
-          )}
         </div>
-      </div>
-      <div className="g2">
-        <div className="card">
-          <b>Holdings</b>
-          {P.rows.length ? (
-            P.rows.map((r) => (
-              <div className="row" key={r.s}>
-                <span>{r.s}</span>
-                <span>{r.q} shares</span>
-                <span className={r.pl >= 0 ? "up" : "dn"}>{sgn(r.pl)}</span>
-              </div>
-            ))
-          ) : (
-            <p className="tiny">No holdings yet. Place a buy order.</p>
-          )}
-          <Link to="/portfolio" className="btn sm" style={{ marginTop: 10 }}>
-            Open portfolio
+        <div className="market-subnav">
+          {[
+            ["Explore", "Explore"],
+            ["Holdings", "Holdings"],
+            ["Orders", "Orders"],
+            ["Watchlist", "Watchlist"],
+          ].map(([label, value]) => (
+            <button
+              key={value}
+              className={activeTab === value ? "active" : ""}
+              onClick={() => setActiveTab(value)}
+            >
+              {label}
+            </button>
+          ))}
+          <Link to="/portfolio" className="market-terminal-link">
+            Portfolio ↗
           </Link>
         </div>
-        <div className="card">
-          <b>Transaction history</b>
-          {st.log.length ? (
-            st.log.slice(0, 6).map((t, i) => (
-              <div className="row" key={i}>
-                <span className={t.side === "BUY" ? "up" : "dn"}>
-                  {t.side} {t.sym} ×{t.qty}
-                </span>
-                <span>{inr(t.price)}</span>
-              </div>
-            ))
-          ) : (
-            <p className="tiny">No transactions yet.</p>
-          )}
+        <div className="market-ticker">
+          {indicesLive.map(([name, value, move]) => (
+            <div className="market-ticker-item" key={name}>
+              <b>{name}</b>
+              <span>{value}</span>
+              <strong className={move >= 0 ? "up" : "dn"}>
+                {move >= 0 ? "+" : ""}
+                {Number(move).toFixed(2)}%
+              </strong>
+            </div>
+          ))}
         </div>
+        {apiError && (
+          <div className="market-api-error" role="alert">
+            {apiError}
+          </div>
+        )}
+        {loading && <p className="market-muted">Loading Indian market data…</p>}
+        {activeTab === "Explore" && (
+          <div className="market-layout">
+            <section className="market-main-column">
+              <div className="market-section-heading">
+                <div>
+                  <span className="market-eyebrow">
+                    <i /> BACKEND MARKET DATA
+                  </span>
+                  <h1>
+                    {query.trim().length >= 2
+                      ? "Search results"
+                      : "Popular Indian Stocks"}
+                  </h1>
+                </div>
+                <span className="market-muted">
+                  {filteredStocks.length} stocks
+                </span>
+              </div>
+              <div className="market-stock-grid">
+                {(query.trim().length >= 2
+                  ? filteredStocks.slice(0, 4)
+                  : popularIndian
+                ).map((stock) => (
+                  <article className="market-stock-card" key={stock.s}>
+                    <div className="market-stock-logo">
+                      {stock.s.slice(0, 2)}
+                    </div>
+                    <div className="market-stock-name">{stock.n}</div>
+                    <div className="market-stock-ticker">{stock.s} · NSE</div>
+                    <div className="market-stock-price">{inr(stock.p)}</div>
+                    <div
+                      className={
+                        stock.c >= 0
+                          ? "market-stock-change up"
+                          : "market-stock-change dn"
+                      }
+                    >
+                      {stock.c >= 0 ? "+" : ""}
+                      {Number(stock.c || 0).toFixed(2)}%
+                    </div>
+                    <div className="market-card-actions">
+                      <button onClick={() => toggleWatch(stock.s)}>
+                        {watchlist.includes(stock.s) ? "★ Saved" : "☆ Watch"}
+                      </button>
+                      <button onClick={() => chooseStock(stock.s)}>
+                        Trade
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              <div className="market-section-heading market-bond-heading">
+                <h2>♧ Popular Bonds</h2>
+              </div>
+              <div className="market-bond-grid">
+                {bonds.map((b) => (
+                  <article className="market-bond-card" key={b.name}>
+                    <div className="market-bond-logo">▤</div>
+                    <b>
+                      {b.name} {b.term}
+                    </b>
+                    <strong>{b.rate}</strong>
+                    <div className="market-bond-meta">
+                      <span>{b.months}</span>
+                      <span>
+                        {b.rating} <i />
+                      </span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              <div className="market-section-heading">
+                <h2>Explore Indian stocks</h2>
+                <span className="market-muted">
+                  {filteredStocks.length} assets
+                </span>
+              </div>
+              <div className="market-list-card">
+                {filteredStocks.slice(0, 100).map((stock) => (
+                  <button
+                    className="market-list-row"
+                    key={stock.s}
+                    onClick={() => chooseStock(stock.s)}
+                  >
+                    <span className="market-list-symbol">
+                      {stock.s.slice(0, 2)}
+                    </span>
+                    <span className="market-list-name">
+                      <b>{stock.n}</b>
+                      <small>
+                        {stock.s} · {stock.sec}
+                      </small>
+                    </span>
+                    <span className="market-list-price">
+                      {stock.p ? inr(stock.p) : "—"}
+                    </span>
+                    <span className={stock.c >= 0 ? "up" : "dn"}>
+                      {stock.c == null
+                        ? "—"
+                        : `${stock.c >= 0 ? "+" : ""}${Number(stock.c).toFixed(2)}%`}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              {query.trim().length >= 2 &&
+                !searchResults.length &&
+                !loading && (
+                  <p className="market-empty">
+                    No matching Indian stocks found.
+                  </p>
+                )}
+            </section>
+            <aside className="market-side-column">
+              <h2>Your investments</h2>
+              <div className="market-investment-card">
+                <span className="market-muted">Current account value</span>
+                <strong className="market-account-value">{inr(P.eq)}</strong>
+                <div className="market-investment-row">
+                  <span>Today's returns</span>
+                  <b className={P.unreal >= 0 ? "up" : "dn"}>{sgn(P.unreal)}</b>
+                </div>
+                <div className="market-investment-row">
+                  <span>Total returns</span>
+                  <b className={P.total >= 0 ? "up" : "dn"}>
+                    {sgn(P.total)} ({((P.total / P.start) * 100).toFixed(2)}%)
+                  </b>
+                </div>
+                <div className="market-investment-row">
+                  <span>Invested</span>
+                  <b>{inr(P.val)}</b>
+                </div>
+                <div className="market-investment-row">
+                  <span>Available cash</span>
+                  <b>{inr(st.cash)}</b>
+                </div>
+                <Link to="/portfolio" className="market-full-link">
+                  View portfolio ↗
+                </Link>
+              </div>
+              <h2 className="market-tools-title">Products &amp; Tools</h2>
+              <div className="market-tools-card">
+                {[
+                  ["📣", "IPOs", "/investing/ipos", "Indian listings"],
+                  ["▤", "Bonds", "/investing/bonds", "Indian fixed income"],
+                  ["▥", "ETFs", "/investing/stocks", "Indian funds"],
+                  [
+                    "⌁",
+                    "Trading",
+                    "/investing/trading",
+                    "Learn trading basics",
+                  ],
+                ].map(([icon, name, path, detail]) => (
+                  <Link to={path} className="market-tool-row" key={name}>
+                    <span>{icon}</span>
+                    <b>{name}</b>
+                    <small>{detail}</small>
+                    <span className="market-tool-arrow">›</span>
+                  </Link>
+                ))}
+              </div>
+              <div className="market-disclaimer">
+                Quotes come from your backend via yfinance and may be delayed.
+                Virtual money only.
+              </div>
+            </aside>
+          </div>
+        )}
+        {activeTab !== "Explore" && (
+          <section className="market-tab-content">
+            <div className="market-section-heading">
+              <div>
+                <span className="market-eyebrow">YOUR SIMULATION</span>
+                <h1>{activeTab}</h1>
+              </div>
+              <Link to="/portfolio" className="market-see-all">
+                Full portfolio ↗
+              </Link>
+            </div>
+            {activeTab === "Watchlist" ? (
+              <div className="market-list-card">
+                {watchlist.length ? (
+                  watchlist.map((ticker) => {
+                    const stock = marketStocks.find((x) => x.s === ticker);
+                    return stock ? (
+                      <div className="market-list-row" key={ticker}>
+                        <span className="market-list-symbol">
+                          {ticker.slice(0, 2)}
+                        </span>
+                        <span className="market-list-name">
+                          <b>{stock.n}</b>
+                          <small>{ticker}</small>
+                        </span>
+                        <span className="market-list-price">
+                          {inr(stock.p)}
+                        </span>
+                        <button onClick={() => toggleWatch(ticker)}>
+                          Remove
+                        </button>
+                        <button onClick={() => chooseStock(ticker)}>
+                          Trade
+                        </button>
+                      </div>
+                    ) : null;
+                  })
+                ) : (
+                  <p className="market-empty">Your watchlist is empty.</p>
+                )}
+              </div>
+            ) : activeTab === "Orders" ? (
+              <div className="market-list-card">
+                {st.log.length ? (
+                  st.log.map((o, i) => (
+                    <div className="market-list-row" key={`${o.t}-${i}`}>
+                      <span className="market-list-symbol">
+                        {o.side === "BUY" ? "↗" : "↘"}
+                      </span>
+                      <span className="market-list-name">
+                        <b>
+                          {o.side} · {o.sym}
+                        </b>
+                        <small>{new Date(o.t).toLocaleString("en-IN")}</small>
+                      </span>
+                      <span>{o.qty} shares</span>
+                      <b>{inr(o.qty * o.price)}</b>
+                    </div>
+                  ))
+                ) : (
+                  <p className="market-empty">No orders yet.</p>
+                )}
+              </div>
+            ) : (
+              <div className="market-list-card">
+                {P.rows.length ? (
+                  P.rows.map((row) => (
+                    <div className="market-list-row" key={row.s}>
+                      <span className="market-list-symbol">
+                        {row.s.slice(0, 2)}
+                      </span>
+                      <span className="market-list-name">
+                        <b>{row.s}</b>
+                        <small>
+                          {row.q} shares · Avg. {inr(row.avg)}
+                        </small>
+                      </span>
+                      <span className="market-list-price">{inr(row.v)}</span>
+                      <b className={row.pl >= 0 ? "up" : "dn"}>{sgn(row.pl)}</b>
+                      <button onClick={() => chooseStock(row.s)}>Trade</button>
+                    </div>
+                  ))
+                ) : (
+                  <p className="market-empty">
+                    No holdings yet. Explore Indian stocks.
+                  </p>
+                )}
+              </div>
+            )}
+          </section>
+        )}
       </div>
-      <Demo />
+      {orderOpen && (
+        <div
+          className="market-order-backdrop"
+          onClick={() => setOrderOpen(false)}
+        >
+          <section
+            className="market-order-panel"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="market-order-close"
+              onClick={() => setOrderOpen(false)}
+            >
+              ×
+            </button>
+            <span className="market-eyebrow">VIRTUAL ORDER</span>
+            <h2>{symbol}</h2>
+            <p className="market-muted">
+              {inr(price)} per share · {change >= 0 ? "+" : ""}
+              {Number(change || 0).toFixed(2)}%
+            </p>
+            {history.length > 0 && (
+              <p className="market-muted">
+                Latest history: {history[history.length - 1].date} · Close{" "}
+                {inr(history[history.length - 1].close)}
+              </p>
+            )}
+            <div className="market-order-tabs">
+              <button
+                className={side === "BUY" ? "selected buy" : ""}
+                onClick={() => {
+                  setSide("BUY");
+                  setMessage("");
+                }}
+              >
+                Buy
+              </button>
+              <button
+                className={side === "SELL" ? "selected sell" : ""}
+                onClick={() => {
+                  setSide("SELL");
+                  setMessage("");
+                }}
+              >
+                Sell
+              </button>
+            </div>
+            <label className="market-qty-label">
+              Quantity
+              <input
+                type="number"
+                min="1"
+                value={qty}
+                onChange={(e) =>
+                  setQty(Math.max(1, Math.floor(Number(e.target.value)) || 1))
+                }
+              />
+            </label>
+            <div className="market-order-total">
+              <span>Estimated value</span>
+              <b>{inr(price * qty)}</b>
+            </div>
+            <div className="market-order-total">
+              <span>Available virtual cash</span>
+              <b>{inr(st.cash)}</b>
+            </div>
+            {message && (
+              <p
+                className={
+                  error ? "market-order-message error" : "market-order-message"
+                }
+              >
+                {message}
+              </p>
+            )}
+            <button
+              className={`market-submit-order ${side === "BUY" ? "buy" : "sell"}`}
+              onClick={submitOrder}
+            >
+              Confirm {side}
+            </button>
+            <p className="market-order-note">
+              Simulated order only. No real money is used.
+            </p>
+          </section>
+        </div>
+      )}
     </main>
   );
 }
@@ -727,51 +1217,32 @@ export function Save() {
   );
 }
 
-const StockCard = ({ x, market, loading }) => (
+const StockCard = ({ x }) => (
   <div className="card" style={{ display: "grid", gap: 8 }}>
     <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
       <div>
         <b>{x.s}</b>
         <div className="tiny">{x.n}</div>
       </div>
-      {(market?.exchange || x.sec) && (
-        <span className="pill" style={{ alignSelf: "start" }}>
-          {market?.exchange || x.sec}
-        </span>
-      )}
+      <span className="pill" style={{ alignSelf: "start" }}>
+        {x.sec}
+      </span>
     </div>
-    {market && !market.error ? (
-      <>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "end",
-          }}
-        >
-          <div>
-            <div className="big" style={{ margin: 0 }}>
-              {formatStockPrice(market.price, market.currency)}
-            </div>
-            <div className="tiny">
-              {market.price_type === "latest_close" ? "Latest close" : "Market quote"}
-              {" · "}
-              {market.as_of}
-            </div>
-          </div>
-          {market.change_percent != null && <Chg c={market.change_percent} />}
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "end",
+      }}
+    >
+      <div>
+        <div className="big" style={{ margin: 0 }}>
+          {inr(x.p)}
         </div>
-        {market.history?.length ? (
-          <StockChart h={125} history={market.history} />
-        ) : (
-          <p className="mu">Historical chart unavailable.</p>
-        )}
-      </>
-    ) : (
-      <p className={market?.error ? "dn" : "mu"}>
-        {market?.error || (loading ? "Loading market data..." : "Market data unavailable.")}
-      </p>
-    )}
+        <Chg c={x.c} />
+      </div>
+      <Spark up={x.c >= 0} />
+    </div>
     <Link
       to={`/invest/simulation?asset=${x.s}`}
       className="btn sm"
@@ -784,113 +1255,12 @@ const StockCard = ({ x, market, loading }) => (
 export function Markets() {
   const [q, setQ] = useState(""),
     [tab, setTab] = useState("All");
-  const [apiStocks, setApiStocks] = useState([]);
-  const [searchError, setSearchError] = useState("");
-  const [searching, setSearching] = useState(false);
-  const [marketData, setMarketData] = useState({});
-  const [marketDataError, setMarketDataError] = useState("");
-  const [loadingMarketData, setLoadingMarketData] = useState(false);
-
-  useEffect(() => {
-    const query = q.trim();
-
-    if (query.length < 2) {
-      setApiStocks([]);
-      setSearchError("");
-      setSearching(false);
-      return;
-    }
-
-    const controller = new AbortController();
-
-    const timer = setTimeout(async () => {
-      try {
-        setSearching(true);
-        setSearchError("");
-        setApiStocks([]);
-
-        const response = await fetch(
-          `${API_BASE_URL}/stocks/search?q=${encodeURIComponent(query)}`,
-          { signal: controller.signal },
-        );
-
-        if (!response.ok) {
-          throw new Error("Stock search failed.");
-        }
-
-        const data = await response.json();
-        setApiStocks(data.results || []);
-      } catch (error) {
-        if (error.name !== "AbortError") {
-          setSearchError("Unable to search stocks. Please try again.");
-        }
-      } finally {
-        if (!controller.signal.aborted) {
-          setSearching(false);
-        }
-      }
-    }, 350);
-
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [q]);
-
-  const showingApiResults = q.trim().length >= 2;
   const list = stocks.filter(
-    (s) =>
-      (tab === "All" || s.r === tab) &&
-      (s.s + " " + s.n).toLowerCase().includes(q.toLowerCase()),
-  );
-  const pop = stocks.filter((s) => popular.includes(s.s));
-  const marketSymbols = showingApiResults
-    ? apiStocks.map((stock) => stock.symbol)
-    : [...stocks.map((stock) => stock.s), ...indices.map(([symbol]) => symbol)];
-  const marketSymbolsKey = marketSymbols.join(",");
-
-  useEffect(() => {
-    if (!marketSymbolsKey) {
-      setMarketData({});
-      setMarketDataError("");
-      setLoadingMarketData(false);
-      return;
-    }
-
-    const controller = new AbortController();
-    setLoadingMarketData(true);
-    setMarketDataError("");
-
-    fetch(
-      `${API_BASE_URL}/stocks/market-data?symbols=${encodeURIComponent(marketSymbolsKey)}`,
-      { signal: controller.signal },
-    )
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error("Market data request failed.");
-        }
-        return response.json();
-      })
-      .then((data) => {
-        setMarketData(
-          Object.fromEntries(data.results.map((item) => [item.symbol, item])),
-        );
-      })
-      .catch((error) => {
-        if (error.name !== "AbortError") {
-          setMarketData({});
-          setMarketDataError("Unable to load market data. Please try again.");
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setLoadingMarketData(false);
-        }
-      });
-
-    return () => controller.abort();
-  }, [marketSymbolsKey]);
-
+      (s) =>
+        (tab === "All" || s.r === tab) &&
+        (s.s + " " + s.n).toLowerCase().includes(q.toLowerCase()),
+    ),
+    pop = stocks.filter((s) => popular.includes(s.s));
   return (
     <main className="wrap page">
       <Head
@@ -898,8 +1268,6 @@ export function Markets() {
         s="Search stocks, track indices and jump into a trade."
       />
       <Demo />
-
-      {/* SEARCH BAR */}
       <div className="cta" style={{ margin: "18px 0" }}>
         <input
           style={{ maxWidth: 300 }}
@@ -919,48 +1287,46 @@ export function Markets() {
           ))}
         </div>
       </div>
-
-      {/* SEARCH RESULTS (right under the search bar) */}
-      <h3>Stocks ({showingApiResults ? apiStocks.length : list.length})</h3>
-      <p className="tiny">
-        Prices and daily history from Yahoo Finance; quotes may be delayed.
-      </p>
-      {searching ? (
-        <p className="mu" style={{ margin: "12px 0" }}>
-          Searching stocks...
-        </p>
-      ) : searchError ? (
-        <p className="dn" style={{ margin: "12px 0" }}>
-          {searchError}
-        </p>
-      ) : showingApiResults && apiStocks.length ? (
-        <div className="g3">
-          {apiStocks.map((stock) => (
-            <StockCard
-              key={stock.symbol}
-              x={{
-                s: stock.symbol.replace(/\.(NS|BO)$/i, ""),
-                n: stock.name,
-                sec: stock.exchange,
-              }}
-              market={marketData[stock.symbol]}
-              loading={loadingMarketData}
-            />
-          ))}
-        </div>
-      ) : showingApiResults ? (
-        <p className="mu" style={{ margin: "12px 0" }}>
-          No stocks match your search.
-        </p>
-      ) : list.length ? (
+      <h3>Market indices</h3>
+      <div className="g3">
+        {indices.map((i) => (
+          <div className="card" key={i[0]}>
+            <div className="tiny">{i[0]}</div>
+            <div className="big">{i[1]}</div>
+            <Chg c={i[2]} />
+          </div>
+        ))}
+      </div>
+      <h3>Popular stocks</h3>
+      <div className="g3">
+        {pop.map((s) => (
+          <Link
+            to={`/invest/simulation?asset=${s.s}`}
+            className="card"
+            key={s.s}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <div>
+              <b>{s.s}</b>
+              <div className="tiny">{inr(s.p)}</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <Chg c={s.c} />
+              <br />
+              <Spark up={s.c >= 0} w={50} />
+            </div>
+          </Link>
+        ))}
+      </div>
+      <h3>Stocks ({list.length})</h3>
+      {list.length ? (
         <div className="g3">
           {list.map((s) => (
-            <StockCard
-              key={s.s}
-              x={s}
-              market={marketData[s.s]}
-              loading={loadingMarketData}
-            />
+            <StockCard key={s.s} x={s} />
           ))}
         </div>
       ) : (
@@ -968,120 +1334,28 @@ export function Markets() {
           No stocks match your search.
         </p>
       )}
-      {marketDataError && (
-        <p className="dn" style={{ margin: "12px 0" }}>
-          {marketDataError}
-        </p>
-      )}
-
-      {/* HIDDEN WHILE SEARCHING */}
-      {!showingApiResults && (
-        <>
-          <h3 style={{ marginTop: 24 }}>Market indices</h3>
-          <div className="g3">
-            {indices.map((i) => (
-              <div className="card" key={i[0]}>
-                <div className="tiny">{i[0]}</div>
-                {marketData[i[0]] && !marketData[i[0]].error ? (
-                  <>
-                    <div className="big">
-                      {formatStockPrice(
-                        marketData[i[0]].price,
-                        marketData[i[0]].currency,
-                      )}
-                    </div>
-                    {marketData[i[0]].change_percent != null && (
-                      <Chg c={marketData[i[0]].change_percent} />
-                    )}
-                    <StockChart h={105} history={marketData[i[0]].history} />
-                  </>
-                ) : (
-                  <p className="mu">
-                    {loadingMarketData
-                      ? "Loading market data..."
-                      : "Market data unavailable."}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <h3>Popular stocks</h3>
-          <div className="g3">
-            {pop.map((s) => (
-              <StockCard
-                key={s.s}
-                x={s}
-                market={marketData[s.s]}
-                loading={loadingMarketData}
-              />
-            ))}
-          </div>
-
-          <div className="g2">
-            <div className="card">
-              <b>NIFTY 50</b>
-              {marketData["NIFTY 50"] && !marketData["NIFTY 50"].error ? (
-                <>
-                  <div className="big">
-                    {formatStockPrice(
-                      marketData["NIFTY 50"].price,
-                      marketData["NIFTY 50"].currency,
-                    )}
-                  </div>
-                  <StockChart history={marketData["NIFTY 50"].history} />
-                </>
-              ) : (
-                <p className="mu">
-                  {loadingMarketData
-                    ? "Loading market data..."
-                    : "NIFTY 50 data unavailable."}
-                </p>
-              )}
-            </div>
-            <div>
-              <h3>Top gainers</h3>
-              <Table
-                rows={stocks
-                  .filter((stock) => marketData[stock.s]?.change_percent != null)
-                  .sort(
-                    (a, b) =>
-                      marketData[b.s].change_percent -
-                      marketData[a.s].change_percent,
-                  )
-                  .slice(0, 4)
-                  .map((stock) => [
-                    stock.s,
-                    formatStockPrice(
-                      marketData[stock.s].price,
-                      marketData[stock.s].currency,
-                    ),
-                    marketData[stock.s].change_percent,
-                  ])}
-              />
-              <h3 style={{ marginTop: 16 }}>Top losers</h3>
-              <Table
-                rows={stocks
-                  .filter((stock) => marketData[stock.s]?.change_percent != null)
-                  .sort(
-                    (a, b) =>
-                      marketData[a.s].change_percent -
-                      marketData[b.s].change_percent,
-                  )
-                  .slice(0, 3)
-                  .map((stock) => [
-                    stock.s,
-                    formatStockPrice(
-                      marketData[stock.s].price,
-                      marketData[stock.s].currency,
-                    ),
-                    marketData[stock.s].change_percent,
-                  ])}
-              />
-            </div>
-          </div>
-        </>
-      )}
+      <div className="g2">
+        <div className="card">
+          <b>NIFTY 50</b>
+          <StockChart />
+        </div>
+        <div>
+          <h3>Top gainers</h3>
+          <Table
+            rows={[...stocks]
+              .sort((a, b) => b.c - a.c)
+              .slice(0, 4)
+              .map((a) => [a.s, inr(a.p), a.c])}
+          />
+          <h3 style={{ marginTop: 16 }}>Top losers</h3>
+          <Table
+            rows={[...stocks]
+              .sort((a, b) => a.c - b.c)
+              .slice(0, 3)
+              .map((a) => [a.s, inr(a.p), a.c])}
+          />
+        </div>
+      </div>
     </main>
   );
 }
@@ -1130,97 +1404,72 @@ export function About() {
   );
 }
 
-function AuthLayout({ title, switchText, switchLabel, switchTo, children, onSubmit, buttonText, error, busy }) {
+const Auth = ({ t, sw, children, to, btn }) => {
+  const nav = useNavigate();
   return (
-    <main className="wrap page">
+    <main className="wrap">
       <div className="card auth">
-        <h1 style={{ fontSize: 26 }}>{title}</h1>
-        <form onSubmit={onSubmit} style={{ display: "grid", gap: 12 }}>
+        <h1 style={{ fontSize: 26 }}>{t}</h1>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            nav("/invest");
+          }}
+        >
           {children}
-          {error && <p role="alert" className="dn tiny">{error}</p>}
-          <button className="btn p" style={{ justifyContent: "center" }} disabled={busy}>
-            {busy ? "Please wait…" : buttonText}
+          <button className="btn p" style={{ justifyContent: "center" }}>
+            {btn}
           </button>
         </form>
         <p className="mu" style={{ marginTop: 16 }}>
-          {switchText}{" "}
-          <Link to={switchTo} style={{ color: "#2563eb" }}>{switchLabel}</Link>
-        </p>
-        <p className="tiny mu" style={{ marginTop: 10 }}>
-          Demo account data is saved in this browser on this device.
+          {sw[0]}{" "}
+          <Link to={to} style={{ color: "#2563eb" }}>
+            {sw[1]}
+          </Link>
         </p>
       </div>
     </main>
   );
-}
-
-export function Login() {
-  const nav = useNavigate();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const submit = async (event) => {
-    event.preventDefault();
-    setError("");
-    setBusy(true);
-    try {
-      await loginUser({ email, password });
-      nav("/invest", { replace: true });
-    } catch (err) {
-      setError(err.message || "Unable to log in. Please try again.");
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <AuthLayout title="Log in to Learntra" switchText="New here?" switchLabel="Sign Up" switchTo="/signup" onSubmit={submit} buttonText="Login" error={error} busy={busy}>
-      <label className="fld"><span>Email</span><input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
-      <label className="fld"><span>Password</span><input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
-    </AuthLayout>
-  );
-}
-
-export function Signup() {
-  const nav = useNavigate();
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [ageGroup, setAgeGroup] = useState("20s");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const submit = async (event) => {
-    event.preventDefault();
-    setError("");
-    if (password.length < 8) {
-      setError("Use a password with at least 8 characters.");
-      return;
-    }
-    if (password !== confirm) {
-      setError("Passwords do not match.");
-      return;
-    }
-    setBusy(true);
-    try {
-      await registerUser({ name, email, password, ageGroup });
-      nav("/invest", { replace: true });
-    } catch (err) {
-      setError(err.message || "Unable to create your account. Please try again.");
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <AuthLayout title="Create your account" switchText="Already have an account?" switchLabel="Login" switchTo="/login" onSubmit={submit} buttonText="Create Account" error={error} busy={busy}>
-      <label className="fld"><span>Full name</span><input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" required /></label>
-      <label className="fld"><span>Email</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required /></label>
-      <label className="fld"><span>Password (minimum 8 characters)</span><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" minLength={8} required /></label>
-      <label className="fld"><span>Confirm password</span><input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" required /></label>
-      <label className="fld"><span>Age group</span><select value={ageGroup} onChange={(e) => setAgeGroup(e.target.value)}><option>Teens</option><option>20s</option><option>30s</option><option>40s+</option></select></label>
-    </AuthLayout>
-  );
-}
+};
+export const Login = () => (
+  <Auth
+    t="Log in to Learntra"
+    sw={["New here?", "Sign Up"]}
+    to="/signup"
+    btn="Login"
+  >
+    <input type="email" placeholder="Email" required />
+    <input type="password" placeholder="Password" required />
+    <label className="tiny">
+      <input type="checkbox" style={{ width: "auto" }} /> Remember me
+    </label>
+    <span className="tiny" style={{ color: "#2563eb" }}>
+      Forgot password?
+    </span>
+    <button type="button" className="btn">
+      Continue with Google
+    </button>
+  </Auth>
+);
+export const Signup = () => (
+  <Auth
+    t="Create your account"
+    sw={["Already have an account?", "Login"]}
+    to="/login"
+    btn="Create Account"
+  >
+    <input placeholder="Name" required />
+    <input type="email" placeholder="Email" required />
+    <input type="password" placeholder="Password" required />
+    <input type="password" placeholder="Confirm Password" required />
+    <select>
+      <option>Teens</option>
+      <option>20s</option>
+      <option>30s</option>
+      <option>40s+</option>
+    </select>
+  </Auth>
+);
 export const NotFound = () => (
   <main
     className="wrap page"
@@ -1235,138 +1484,3 @@ export const NotFound = () => (
     </Link>
   </main>
 );
-
-export function Profile() {
-  const user = useAuth();
-  const navigate = useNavigate();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  const handleLogout = async () => {
-    setBusy(true);
-    setError("");
-
-    try {
-      await logoutUser();
-      navigate("/", { replace: true });
-    } catch (err) {
-      setError(err.message || "Unable to log out.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (!user) {
-    return (
-      <main className="wrap page">
-        <Head
-          t="Your Profile"
-          s="Log in to view your Learntra account."
-        />
-        <div className="card">
-          <Link to="/login" className="btn p">
-            Login
-          </Link>
-          <Link to="/signup" className="btn">
-            Create Account
-          </Link>
-        </div>
-      </main>
-    );
-  }
-
-  return (
-    <main className="wrap page">
-      <Head
-        t={`Welcome, ${user.name || "Learner"}!`}
-        s="Your personal Learntra account dashboard."
-      />
-
-      {/* PROFILE DETAILS */}
-      <div className="card" style={{ maxWidth: 700 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <div
-            style={{
-              width: 64,
-              height: 64,
-              borderRadius: "50%",
-              background: "#2563eb",
-              color: "white",
-              display: "grid",
-              placeItems: "center",
-              fontSize: 28,
-              fontWeight: 700,
-            }}
-          >
-            {(user.name || "L").charAt(0).toUpperCase()}
-          </div>
-
-          <div>
-            <h2 style={{ margin: 0 }}>
-              {user.name || "Learntra Learner"}
-            </h2>
-            <p className="mu" style={{ margin: "5px 0" }}>
-              {user.email}
-            </p>
-          </div>
-        </div>
-
-        <hr style={{ margin: "20px 0", opacity: 0.2 }} />
-
-        <div className="row">
-          <span>Full Name</span>
-          <b>{user.name || "Not provided"}</b>
-        </div>
-
-        <div className="row">
-          <span>Email Address</span>
-          <b>{user.email}</b>
-        </div>
-
-        <div className="row">
-          <span>Age Group</span>
-          <b>{user.ageGroup || "Not provided"}</b>
-        </div>
-
-        <div className="row">
-          <span>Account ID</span>
-          <span className="tiny">{user.id}</span>
-        </div>
-      </div>
-
-      {/* QUICK LINKS */}
-      <h3 style={{ marginTop: 24 }}>Quick Access</h3>
-
-      <div className="g3">
-        <Link to="/invest" className="card">
-          <h3>Investment Dashboard</h3>
-          <p className="mu">Explore markets and investment simulations.</p>
-        </Link>
-
-        <Link to="/portfolio" className="card">
-          <h3>My Portfolio</h3>
-          <p className="mu">View virtual holdings and performance.</p>
-        </Link>
-
-        <Link to="/personal-finance/financial-plan" className="card">
-          <h3>Financial Planning</h3>
-          <p className="mu">Create your financial plan.</p>
-        </Link>
-      </div>
-
-      {/* LOGOUT */}
-      <div className="card" style={{ marginTop: 24 }}>
-        {error && <p className="dn">{error}</p>}
-
-        <button
-          className="btn p"
-          onClick={handleLogout}
-          disabled={busy}
-        >
-          {busy ? "Logging out..." : "Log Out"}
-        </button>
-      </div>
-    </main>
-  );
-}
-

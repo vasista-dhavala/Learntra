@@ -1,6 +1,5 @@
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { logoutUser, useAuth } from "../data/auth.js";
 import { Rocket, Moon, Sun, Menu, ChevronDown } from "lucide-react";
 import "./Navbar.css";
 
@@ -8,7 +7,7 @@ const groups = [
   {
     label: "NEWS",
     items: [
-      ["Stock Market", "/news/markets"],
+      ["Markets", "/news/markets"],
       ["Companies", "/news/companies"],
       ["Economy", "/news/economy"],
       ["Government", "/news/government"],
@@ -43,8 +42,6 @@ const groups = [
 
 export default function Navbar() {
   const location = useLocation();
-  const navigate = useNavigate();
-  const user = useAuth();
 
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openGroup, setOpenGroup] = useState(null);
@@ -68,17 +65,6 @@ export default function Navbar() {
 
   const toggleGroup = (label) => {
     setOpenGroup((current) => (current === label ? null : label));
-  };
-
-  const handleLogout = async () => {
-    try {
-      await logoutUser();
-      setMobileOpen(false);
-      setOpenGroup(null);
-      navigate("/");
-    } catch (error) {
-      console.error("Logout failed:", error.message);
-    }
   };
 
   return (
@@ -135,31 +121,15 @@ export default function Navbar() {
             );
           })}
 
-          {/* MOBILE ACCOUNT */}
+          {/* MOBILE LOGIN */}
           <div className="mobile-auth">
-            {user ? (
-              <>
-                <Link
-                  to="/profile"
-                  className="btn p"
-                  onClick={() => setMobileOpen(false)}
-                >
-                  My Profile
-                </Link>
-
-                <button className="btn p" onClick={handleLogout}>
-                  Log out
-                </button>
-              </>
-            ) : (
-              <Link
-                to="/login"
-                className="btn p"
-                onClick={() => setMobileOpen(false)}
-              >
-                Login / Sign Up
-              </Link>
-            )}
+            <Link
+              to="/login"
+              className="btn p"
+              onClick={() => setMobileOpen(false)}
+            >
+              Login / Sign Up
+            </Link>
           </div>
         </nav>
 
@@ -177,28 +147,10 @@ export default function Navbar() {
             {darkMode ? <Sun size={20} /> : <Moon size={20} />}
           </button>
 
-          {/* ACCOUNT */}
-          {user ? (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 9,
-              }}
-            >
-              <Link to="/profile" className="btn p sm">
-                My Profile
-              </Link>
-
-              <button className="btn p sm" onClick={handleLogout}>
-                Log out
-              </button>
-            </div>
-          ) : (
-            <Link to="/login" className="btn p sm">
-              Login / Sign Up
-            </Link>
-          )}
+          {/* LOGIN */}
+          <Link to="/login" className="btn p sm">
+            Login / Sign Up
+          </Link>
 
           {/* MOBILE MENU */}
           <button
