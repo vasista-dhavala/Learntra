@@ -125,230 +125,31 @@ export function Invest() {
 }
 
 export function Simulation() {
-  const [sp] = useSearchParams();
-  const P = usePortfolio();
-  const { st } = P;
-  const API = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
-  const [activeTab, setActiveTab] = useState("Explore");
-  const [query, setQuery] = useState("");
-  const [watchlist, setWatchlist] = useState([
-    "TCS",
-    "RELIANCE",
-    "HDFCBANK",
-    "INFY",
-  ]);
-  const [marketStocks, setMarketStocks] = useState(
-    stocks.filter((x) => x.r === "India"),
-  );
-  const [quotes, setQuotes] = useState({});
-  const [indicesLive, setIndicesLive] = useState(
-    indices.filter((x) => ["NIFTY 50", "SENSEX"].includes(x[0])),
-  );
-  const [searchResults, setSearchResults] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [apiError, setApiError] = useState("");
-  const [selectedSymbol, setSelectedSymbol] = useState(
-    sp.get("asset") || "TCS",
-  );
-  const [history, setHistory] = useState([]);
-  const [side, setSide] = useState("BUY");
-  const [qty, setQty] = useState(1);
-  const [orderOpen, setOrderOpen] = useState(false);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState(false);
-  const normalize = (s) =>
-    String(s || "")
-      .toUpperCase()
-      .replace(/\.NS$/, "");
-
-  const fetchQuotes = async (symbols) => {
-    if (!symbols.length) return {};
-    const response = await fetch(
-      `${API}/stocks/market-data?symbols=${encodeURIComponent(symbols.join(","))}`,
-    );
-    if (!response.ok)
-      throw new Error(`Market data request failed (${response.status})`);
-    const body = await response.json();
-    return Object.fromEntries(
-      (body.results || [])
-        .filter((x) => !x.error)
-        .map((x) => [normalize(x.symbol), x]),
-    );
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      setApiError("");
-      try {
-        const symbols = [
-          ...new Set(stocks.filter((x) => x.r === "India").map((x) => x.s)),
-        ];
-        const map = await fetchQuotes([...symbols, "^NSEI", "^BSESN"]);
-        if (cancelled) return;
-        setQuotes(map);
-        setMarketStocks(
-          stocks
-            .filter((x) => x.r === "India")
-            .map((x) => {
-              const q = map[normalize(x.s)];
-              return {
-                ...x,
-                p: q?.price ?? x.p,
-                c: q?.change_percent ?? x.c,
-                asOf: q?.as_of,
-                priceType: q?.price_type,
-              };
-            }),
-        );
-        const indexRows = [
-          ["NIFTY 50", map["^NSEI"]],
-          ["SENSEX", map["^BSESN"]],
-        ].filter(([, q]) => q);
-        if (indexRows.length)
-          setIndicesLive(
-            indexRows.map(([name, q]) => [
-              name,
-              Number(q.price).toLocaleString("en-IN", {
-                maximumFractionDigits: 2,
-              }),
-              q.change_percent ?? 0,
-            ]),
-          );
-      } catch (e) {
-        if (!cancelled)
-          setApiError(
-            `${e.message}. Confirm the FastAPI server is running at ${API}.`,
-          );
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    load();
-    const interval = setInterval(load, 60000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [API]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (query.trim().length < 2) {
-      setSearchResults([]);
-      return;
-    }
-    const timer = setTimeout(async () => {
-      try {
-        const response = await fetch(
-          `${API}/stocks/search?q=${encodeURIComponent(query.trim())}`,
-        );
-        if (!response.ok) throw new Error("Search failed");
-        const body = await response.json();
-        const matches = (body.results || []).filter(
-          (x) =>
-            /\.NS$|\.BO$/.test(x.symbol) || ["NSE", "BSE"].includes(x.exchange),
-        );
-        const map = await fetchQuotes(matches.map((x) => x.symbol));
-        if (cancelled) return;
-        setSearchResults(
-          matches.map((x) => {
-            const s = normalize(x.symbol),
-              q = map[s],
-              existing = marketStocks.find((v) => v.s === s);
-            return {
-              s,
-              n: x.name,
-              sec: existing?.sec || "Indian equities",
-              p: q?.price ?? existing?.p ?? 0,
-              c: q?.change_percent ?? existing?.c ?? 0,
-              r: "India",
-            };
-          }),
-        );
-      } catch {
-        if (!cancelled) setSearchResults([]);
-      }
-    }, 300);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [query, API, marketStocks]);
-
-  const current =
-    marketStocks.find((x) => x.s === selectedSymbol) ||
-    marketStocks[0] ||
-    stocks[0];
-  const symbol = current.s;
-  const price = quotes[normalize(symbol)]?.price ?? current.p;
-  const change = quotes[normalize(symbol)]?.change_percent ?? current.c;
-  const filteredStocks =
-    query.trim().length >= 2 ? searchResults : marketStocks;
-  const popularIndian = ["RELIANCE", "TCS", "HDFCBANK", "INFY"]
-    .map((s) => marketStocks.find((x) => x.s === s))
-    .filter(Boolean);
-  const bonds = [
-    {
-      name: "Navi Finserv Ltd.",
-      term: "May '28",
-      rate: "10.10%",
-      months: "18 months",
-      rating: "A+",
-    },
-    {
-      name: "Muthoot Fincorp Ltd.",
-      term: "Sep '29",
-      rate: "9.10%",
-      months: "34 months",
-      rating: "AA",
-    },
-    {
-      name: "Piramal Finance Ltd.",
-      term: "Sep '31",
-      rate: "9.15%",
-      months: "58 months",
-      rating: "AA+",
-    },
-    {
-      name: "Lucina Land Development Ltd.",
-      term: "Jan '29",
-      rate: "13.30%",
-      months: "26 months",
-      rating: "A-",
-    },
-  ];
-  const chooseStock = async (ticker) => {
-    const s = normalize(ticker);
-    setSelectedSymbol(s);
-    setOrderOpen(true);
-    setMessage("");
-    try {
-      const r = await fetch(
-        `${API}/stocks/${encodeURIComponent(s)}/history?period=1mo`,
-      );
-      if (r.ok) setHistory((await r.json()).history || []);
-    } catch {
-      setHistory([]);
+  const [sp] = useSearchParams(),
+    P = usePortfolio(),
+    { st, tick } = P;
+  const [side, setSide] = useState("BUY"),
+    [sym, setSym] = useState(
+      Math.max(
+        0,
+        assets.findIndex((a) => a[0] === sp.get("asset")),
+      ),
+    ),
+    [qty, setQty] = useState(1),
+    [ok, setOk] = useState(false),
+    [err, setErr] = useState("");
+  const [s, base] = assets[sym],
+    p = livePrice(base, sym, tick),
+    tot = p * qty,
+    h = st.hold[s];
+  const go = () => {
+    const e = trade(side, s, qty, p);
+    setErr(e);
+    if (!e) {
+      setOk(false);
+      setQty(1);
     }
   };
-  const submitOrder = () => {
-    const result = trade(side, symbol, qty, price);
-    setMessage(
-      result ||
-        `${side === "BUY" ? "Bought" : "Sold"} ${qty} ${symbol} successfully.`,
-    );
-    setError(Boolean(result));
-    if (!result) setQty(1);
-  };
-  const toggleWatch = (ticker) =>
-    setWatchlist((list) =>
-      list.includes(ticker)
-        ? list.filter((x) => x !== ticker)
-        : [...list, ticker],
-    );
-
   return (
     <main className="market-page">
       <div className="market-shell">
@@ -818,10 +619,12 @@ export function Portfolio() {
         </Link>
         <button
           className="btn sm"
-          onClick={() =>
-            window.confirm("Reset your virtual portfolio to ₹1,00,000?") &&
-            resetPortfolio()
-          }
+          onClick={async () => {
+            if (!window.confirm("Reset your virtual portfolio to ₹1,00,000?"))
+              return;
+            const error = await resetPortfolio();
+            if (error) window.alert(error);
+          }}
         >
           Reset portfolio
         </button>
